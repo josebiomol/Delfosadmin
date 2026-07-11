@@ -63,7 +63,7 @@ export async function logoutAdmin() {
 
 // ========== DASHBOARD ==========
 export async function getDashboardStats() {
-  const { data: orgs, error } = await supabase.from('organizations').select('org_id, status, trial_expira_em, criado_em');
+  const { data: orgs, error } = await supabase.from('organizations').select('org_id, status, trial_expira_em, criado_em, nome_org, nome_fantasia');
   if (error) throw new Error(error.message);
 
   const total = orgs.length;
@@ -77,8 +77,15 @@ export async function getDashboardStats() {
     const dias = Math.ceil((new Date(o.trial_expira_em) - hoje) / 86400000);
     return dias <= 10 && dias >= 0;
   });
+  // Trial que já passou da data e ninguém ainda tomou nenhuma ação
+  // (nem virou "ativo" nem "cancelado") — precisa de contato manual.
+  const trialVencido = orgs.filter(o => {
+    if (o.status !== 'trial' || !o.trial_expira_em) return false;
+    const dias = Math.ceil((new Date(o.trial_expira_em) - hoje) / 86400000);
+    return dias < 0;
+  });
 
-  return { total, ativas, suspensas, trial, trialExpirando };
+  return { total, ativas, suspensas, trial, trialExpirando, trialVencido };
 }
 
 export async function getAtividadeRecente(limite = 8) {
