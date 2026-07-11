@@ -77,7 +77,7 @@ h2{margin:0 0 4px}
   .stats-grid{grid-template-columns:repeat(2,1fr)}
 }
 @media (min-width: 769px) {
-  .stats-grid{grid-template-columns:repeat(4,1fr)}
+  .stats-grid{grid-template-columns:repeat(5,1fr)}
   .dash-2col{grid-template-columns:1.3fr 1fr}
 }
 
