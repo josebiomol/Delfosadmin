@@ -278,8 +278,9 @@ export async function excluirPlano(plano_key) {
 }
 
 // Aplica o plano numa empresa: seta organizations.plano E já espelha os
-// módulos do plano em org_modulos, tudo numa tacada (o botão "Aplicar
-// módulos do plano" na tela Empresas chama isso).
+// módulos do plano em org_modulos — preservando as sub-telas de
+// Configurações que vieram do Segmento (são fatias independentes, uma
+// não apaga a outra).
 export async function aplicarPlanoNaEmpresa(org_id, plano_key) {
   const { data: plano, error: planoErr } = await supabase.from('planos').select('*').eq('plano_key', plano_key).maybeSingle();
   if (planoErr) throw new Error(planoErr.message);
@@ -288,6 +289,71 @@ export async function aplicarPlanoNaEmpresa(org_id, plano_key) {
   const { error: orgErr } = await supabase.from('organizations').update({ plano: plano_key }).eq('org_id', org_id);
   if (orgErr) throw new Error(orgErr.message);
 
-  await salvarModulosDaEmpresa(org_id, plano.modulos_json || []);
+  const todasSubtelas = (await getSubtelas()).map(s => s.subtela_key);
+  const { data: atuais } = await supabase.from('org_modulos').select('modulo_key').eq('org_id', org_id);
+  const subtelasAtuais = (atuais || []).map(m => m.modulo_key).filter(k => todasSubtelas.includes(k));
+
+  await salvarModulosDaEmpresa(org_id, [...(plano.modulos_json || []), ...subtelasAtuais]);
   return { success: true, plano };
+}
+
+// ========== SUB-TELAS DE CONFIGURAÇÃO (registro dinâmico) ==========
+export async function getSubtelas() {
+  const { data, error } = await supabase.from('subtelas_configuracao').select('*').eq('ativo', 'SIM').order('criado_em');
+  if (error) throw new Error(error.message);
+  return data || [];
+}
+
+export async function salvarSubtela({ subtela_key, label }) {
+  const key = subtela_key || `subtela_${label.toLowerCase().replace(/[^a-z0-9]+/g, '_')}`;
+  const { error } = await supabase.from('subtelas_configuracao').upsert({ subtela_key: key, label }, { onConflict: 'subtela_key' });
+  if (error) throw new Error(error.message);
+  return { success: true };
+}
+
+export async function excluirSubtela(subtela_key) {
+  const { error } = await supabase.from('subtelas_configuracao').update({ ativo: 'NAO' }).eq('subtela_key', subtela_key);
+  if (error) throw new Error(error.message);
+  return { success: true };
+}
+
+// ========== SEGMENTOS DE NEGÓCIO ==========
+export async function getSegmentos() {
+  const { data, error } = await supabase.from('segmentos').select('*').eq('ativo', 'SIM').order('criado_em');
+  if (error) throw new Error(error.message);
+  return data || [];
+}
+
+export async function salvarSegmento(payload) {
+  const { segmento_key, ...formData } = payload;
+  const row = { ...formData };
+  row.segmento_key = segmento_key || `SEG${Date.now()}`;
+  const { error } = await supabase.from('segmentos').upsert(row, { onConflict: 'segmento_key' });
+  if (error) throw new Error(error.message);
+  return { success: true };
+}
+
+export async function excluirSegmento(segmento_key) {
+  const { error } = await supabase.from('segmentos').update({ ativo: 'NAO' }).eq('segmento_key', segmento_key);
+  if (error) throw new Error(error.message);
+  return { success: true };
+}
+
+// Aplica o segmento numa empresa: seta organizations.segmento E espelha
+// as sub-telas dele em org_modulos — preservando os módulos principais
+// que vieram do Plano.
+export async function aplicarSegmentoNaEmpresa(org_id, segmento_key) {
+  const { data: segmento, error: segErr } = await supabase.from('segmentos').select('*').eq('segmento_key', segmento_key).maybeSingle();
+  if (segErr) throw new Error(segErr.message);
+  if (!segmento) throw new Error('Segmento não encontrado.');
+
+  const { error: orgErr } = await supabase.from('organizations').update({ segmento: segmento_key }).eq('org_id', org_id);
+  if (orgErr) throw new Error(orgErr.message);
+
+  const todasSubtelas = (await getSubtelas()).map(s => s.subtela_key);
+  const { data: atuais } = await supabase.from('org_modulos').select('modulo_key').eq('org_id', org_id);
+  const modulosPrincipaisAtuais = (atuais || []).map(m => m.modulo_key).filter(k => !todasSubtelas.includes(k));
+
+  await salvarModulosDaEmpresa(org_id, [...modulosPrincipaisAtuais, ...(segmento.subtelas_json || [])]);
+  return { success: true, segmento };
 }
