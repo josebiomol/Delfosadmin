@@ -2,6 +2,7 @@ import {
   getOrganizacoes, atualizarStatusOrganizacao,
   getModulosDaEmpresa, salvarModulosDaEmpresa,
   getPlanos, aplicarPlanoNaEmpresa,
+  getSegmentos, aplicarSegmentoNaEmpresa,
 } from '../services/supabaseAdminService.js';
 import { escapeHTML } from '../utils/escapeHTML.js';
 import { toast } from '../utils/toast.js';
@@ -10,16 +11,19 @@ import { MODULOS } from './modulosLista.js';
 export const EmpresasUI = {
   _lista: [],
   _planos: [],
+  _segmentos: [],
   _filtroBusca: '',
   _filtroStatus: '',
 
   async carregar() {
-    const [lista, planos] = await Promise.all([
+    const [lista, planos, segmentos] = await Promise.all([
       getOrganizacoes({ busca: this._filtroBusca, status: this._filtroStatus }),
       getPlanos(),
+      getSegmentos(),
     ]);
     this._lista = lista;
     this._planos = planos.filter(p => p.ativo === 'SIM');
+    this._segmentos = segmentos.filter(s => s.ativo === 'SIM');
   },
 
   render() {
@@ -50,6 +54,7 @@ export const EmpresasUI = {
           <tr>
             <th>Empresa</th>
             <th>Plano</th>
+            <th>Segmento</th>
             <th>Usuários</th>
             <th>Status</th>
             <th style="width:110px">Ativo</th>
@@ -67,6 +72,13 @@ export const EmpresasUI = {
                   ${this._planos.map(p => `<option value="${p.plano_key}" ${p.plano_key === o.plano ? 'selected' : ''}>${escapeHTML(p.nome)}</option>`).join('')}
                 </select>
                 <button class="link-btn btn-aplicar-plano" data-org="${o.org_id}" style="display:block;margin-top:4px;font-size:10.5px">Aplicar módulos</button>
+              </td>
+              <td>
+                <select class="select sel-segmento" data-org="${o.org_id}" style="font-size:11.5px;padding:5px 8px">
+                  <option value="">— nenhum —</option>
+                  ${this._segmentos.map(s => `<option value="${s.segmento_key}" ${s.segmento_key === o.segmento ? 'selected' : ''}>${escapeHTML(s.nome)}</option>`).join('')}
+                </select>
+                <button class="link-btn btn-aplicar-segmento" data-org="${o.org_id}" style="display:block;margin-top:4px;font-size:10.5px">Aplicar sub-telas</button>
               </td>
               <td>${o.total_usuarios}</td>
               <td>${this._badgeStatus(o)}</td>
@@ -164,6 +176,24 @@ export const EmpresasUI = {
           toast.show(`Plano "${plano.nome}" aplicado.`, 'success');
         } catch (e) {
           toast.show('Erro ao aplicar plano: ' + e.message, 'error');
+        }
+      };
+    });
+    document.querySelectorAll('.btn-aplicar-segmento').forEach(btn => {
+      btn.onclick = async () => {
+        const org_id = btn.dataset.org;
+        const select = document.querySelector(`.sel-segmento[data-org="${org_id}"]`);
+        const segmento_key = select.value;
+        if (!segmento_key) { toast.show('Escolha um segmento primeiro.', 'error'); return; }
+        const segmento = this._segmentos.find(s => s.segmento_key === segmento_key);
+        if (!confirm(`Aplicar o segmento "${segmento.nome}"? Isso ajusta as sub-telas de Configurações dessa empresa pro padrão desse segmento.`)) return;
+        try {
+          await aplicarSegmentoNaEmpresa(org_id, segmento_key);
+          const org = this._lista.find(o => o.org_id === org_id);
+          org.segmento = segmento_key;
+          toast.show(`Segmento "${segmento.nome}" aplicado.`, 'success');
+        } catch (e) {
+          toast.show('Erro ao aplicar segmento: ' + e.message, 'error');
         }
       };
     });
