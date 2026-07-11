@@ -41,6 +41,9 @@ const MODULOS = [
     { key: 'cadeia_valor', label: 'Cadeia de valor' },
     { key: 'gestao_mudanca_inovacao', label: 'Gestão de mudança e inovação' },
   ] },
+  { grupo: 'Sistema', itens: [
+    { key: 'configuracoes', label: 'Configurações (usuários, permissões, etc.)' },
+  ] },
 ];
 
 export const EmpresasUI = {
@@ -103,13 +106,29 @@ export const EmpresasUI = {
       </div>`;
   },
 
+  _formatarDataBR(iso) {
+    if (!iso) return '—';
+    const d = new Date(iso.length === 10 ? iso + 'T12:00:00' : iso);
+    return d.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric' });
+  },
+
   _badgeStatus(o) {
-    if (o.status === 'suspenso') return `<span class="badge b-red">Suspenso</span>`;
-    if (o.status === 'trial') {
-      const dias = o.trial_expira_em ? Math.max(0, Math.ceil((new Date(o.trial_expira_em) - Date.now()) / 86400000)) : null;
-      return `<span class="badge b-yellow">Trial${dias !== null ? ` (${dias}d)` : ''}</span>`;
+    const criadoEm = this._formatarDataBR(o.criado_em);
+    if (o.status === 'suspenso') {
+      return `<span class="badge b-red">Suspenso</span><div style="font-size:10.5px;color:var(--muted);margin-top:4px">Criado em ${criadoEm}</div>`;
     }
-    return `<span class="badge b-green">Ativo</span>`;
+    if (o.status === 'trial') {
+      if (!o.trial_expira_em) {
+        return `<span class="badge b-yellow">Trial</span><div style="font-size:10.5px;color:var(--muted);margin-top:4px">Criado em ${criadoEm}</div>`;
+      }
+      const dias = Math.ceil((new Date(o.trial_expira_em) - Date.now()) / 86400000);
+      const vencaEm = this._formatarDataBR(o.trial_expira_em);
+      if (dias < 0) {
+        return `<span class="badge b-red">Trial vencido</span><div style="font-size:10.5px;color:var(--danger);margin-top:4px">Venceu em ${vencaEm} (há ${Math.abs(dias)}d) · criado ${criadoEm}</div>`;
+      }
+      return `<span class="badge b-yellow">Trial · ${dias}d restante${dias === 1 ? '' : 's'}</span><div style="font-size:10.5px;color:var(--muted);margin-top:4px">Criado ${criadoEm} · vence ${vencaEm}</div>`;
+    }
+    return `<span class="badge b-green">Ativo</span><div style="font-size:10.5px;color:var(--muted);margin-top:4px">Criado em ${criadoEm}</div>`;
   },
 
   bind(onIrPara) {
