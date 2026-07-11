@@ -42,16 +42,26 @@ export const DashboardUI = {
           <div class="stat-icon" style="background:rgba(217,119,6,.12);color:var(--warn)"><i class="fa-solid fa-hourglass-half"></i></div>
           <div><div class="stat-label">Em trial</div><div class="stat-value" style="color:var(--warn)">${stats.trial}</div></div>
         </div>
+        <div class="stat-card">
+          <div class="stat-icon" style="background:rgba(239,68,68,.12);color:var(--danger)"><i class="fa-solid fa-clock"></i></div>
+          <div><div class="stat-label">Trial vencido</div><div class="stat-value" style="color:var(--danger)">${stats.trialVencido.length}</div></div>
+        </div>
       </div>
 
       <div class="dash-2col">
         <div class="card">
           <h3><i class="fa-solid fa-triangle-exclamation" style="color:var(--warn);margin-right:6px"></i>Precisa de atenção</h3>
+          ${stats.trialVencido.length ? stats.trialVencido.map(o => `
+            <div class="attn-row" style="background:rgba(239,68,68,.06);border-radius:8px;padding:9px 8px;border-top:none;margin-bottom:4px">
+              <span><span class="badge b-red" style="margin-right:6px">Trial encerrado</span>${escapeHTML(o.nome_fantasia || o.nome_org)} — venceu há ${Math.abs(Math.ceil((new Date(o.trial_expira_em) - Date.now()) / 86400000))} dia(s). Entrar em contato pra saber se vai continuar.</span>
+              <button class="link-btn" data-goto-empresas="${o.org_id}">Ver empresa →</button>
+            </div>`).join('') : ''}
           ${stats.trialExpirando.length ? stats.trialExpirando.map(o => `
             <div class="attn-row">
               <span>${escapeHTML(o.nome_fantasia || o.nome_org)} — trial expira em ${Math.max(0, Math.ceil((new Date(o.trial_expira_em) - Date.now()) / 86400000))} dia(s)</span>
               <button class="link-btn" data-goto-empresas="${o.org_id}">Ver empresa →</button>
-            </div>`).join('') : `<p style="color:var(--muted);font-size:12.5px;margin:0">Nada precisando de atenção agora.</p>`}
+            </div>`).join('') : ''}
+          ${(!stats.trialVencido.length && !stats.trialExpirando.length) ? `<p style="color:var(--muted);font-size:12.5px;margin:0">Nada precisando de atenção agora.</p>` : ''}
         </div>
 
         <div class="card">
