@@ -10,8 +10,10 @@ const VIEWS = {
   auditoria: { label: 'Auditoria', icon: 'fa-clock-rotate-left', modulo: AuditoriaUI },
 };
 
+const VIEW_SALVA = sessionStorage.getItem('delfosAdminViewAtual');
+
 export const ShellUI = {
-  _viewAtual: 'dashboard',
+  _viewAtual: (VIEW_SALVA && VIEWS[VIEW_SALVA]) ? VIEW_SALVA : 'dashboard',
   _admin: null,
 
   render(admin) {
@@ -46,7 +48,9 @@ export const ShellUI = {
   },
 
   async _irPara(viewKey, filtroInicial) {
+    if (!VIEWS[viewKey]) viewKey = 'dashboard';
     this._viewAtual = viewKey;
+    sessionStorage.setItem('delfosAdminViewAtual', viewKey);
     document.querySelectorAll('.nav-item').forEach(n => n.classList.toggle('active', n.dataset.view === viewKey));
     await this._renderView(filtroInicial);
   },
