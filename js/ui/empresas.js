@@ -1,58 +1,25 @@
 import {
   getOrganizacoes, atualizarStatusOrganizacao,
   getModulosDaEmpresa, salvarModulosDaEmpresa,
+  getPlanos, aplicarPlanoNaEmpresa,
 } from '../services/supabaseAdminService.js';
 import { escapeHTML } from '../utils/escapeHTML.js';
 import { toast } from '../utils/toast.js';
-
-// Cópia da lista de módulos do app cliente (menuModules.js). Se adicionar
-// um módulo novo lá, replique aqui também — são dois projetos separados.
-const MODULOS = [
-  { grupo: 'Gestão Estratégica', itens: [
-    { key: 'gestao_estrategica', label: 'Gestão Estratégica (BSC/Backlog/Sprints)' },
-  ] },
-  { grupo: 'Qualidade', itens: [
-    { key: 'gestao_documentos', label: 'Gestão de documentos' },
-    { key: 'gestao_processos', label: 'Gestão de processos' },
-    { key: 'gestao_riscos', label: 'Gestão de riscos' },
-    { key: 'gestao_ocorrencias', label: 'Gestão de ocorrências' },
-    { key: 'gestao_planos_acoes', label: 'Gestão de planos de ações' },
-    { key: 'gestao_indicadores', label: 'Gestão de indicadores' },
-    { key: 'gestao_auditorias', label: 'Gestão de auditorias' },
-  ] },
-  { grupo: 'Pessoas', itens: [
-    { key: 'gestao_treinamentos', label: 'Gestão de treinamentos' },
-    { key: 'gestao_acidentes', label: 'Gestão de acidentes' },
-    { key: 'recursos_humanos', label: 'Recursos humanos' },
-  ] },
-  { grupo: 'Operação', itens: [
-    { key: 'agendamento', label: 'Agendamento' },
-    { key: 'gestao_atendimento_cliente', label: 'Gestão de atendimento ao cliente' },
-    { key: 'gestao_reunioes', label: 'Gestão de reuniões' },
-    { key: 'gestao_ordem_servico', label: 'Gestão de ordem de serviço' },
-    { key: 'gestao_patrimonio', label: 'Gestão do patrimônio' },
-    { key: 'controle_agua', label: 'Controle de qualidade da água' },
-    { key: 'gestao_temp_umidade', label: 'Controle de temperatura e umidade' },
-  ] },
-  { grupo: 'Fornecedores e estratégia', itens: [
-    { key: 'gestao_fornecedores_produtos', label: 'Gestão de fornecedores de produtos' },
-    { key: 'gestao_fornecedores_servicos', label: 'Gestão de fornecedores de serviços' },
-    { key: 'modelo_canvas', label: 'Modelo de negócio canvas' },
-    { key: 'cadeia_valor', label: 'Cadeia de valor' },
-    { key: 'gestao_mudanca_inovacao', label: 'Gestão de mudança e inovação' },
-  ] },
-  { grupo: 'Sistema', itens: [
-    { key: 'configuracoes', label: 'Configurações (usuários, permissões, etc.)' },
-  ] },
-];
+import { MODULOS } from './modulosLista.js';
 
 export const EmpresasUI = {
   _lista: [],
+  _planos: [],
   _filtroBusca: '',
   _filtroStatus: '',
 
   async carregar() {
-    this._lista = await getOrganizacoes({ busca: this._filtroBusca, status: this._filtroStatus });
+    const [lista, planos] = await Promise.all([
+      getOrganizacoes({ busca: this._filtroBusca, status: this._filtroStatus }),
+      getPlanos(),
+    ]);
+    this._lista = lista;
+    this._planos = planos.filter(p => p.ativo === 'SIM');
   },
 
   render() {
@@ -94,7 +61,13 @@ export const EmpresasUI = {
           ${this._lista.map(o => `
             <tr>
               <td><div class="org-name">${escapeHTML(o.nome_fantasia || o.nome_org)}</div><div class="org-sub">CNPJ ${escapeHTML(o.cnpj || '—')}</div></td>
-              <td>${escapeHTML(o.plano || 'completo')}</td>
+              <td>
+                <select class="select sel-plano" data-org="${o.org_id}" style="font-size:11.5px;padding:5px 8px">
+                  <option value="">— nenhum —</option>
+                  ${this._planos.map(p => `<option value="${p.plano_key}" ${p.plano_key === o.plano ? 'selected' : ''}>${escapeHTML(p.nome)}</option>`).join('')}
+                </select>
+                <button class="link-btn btn-aplicar-plano" data-org="${o.org_id}" style="display:block;margin-top:4px;font-size:10.5px">Aplicar módulos</button>
+              </td>
               <td>${o.total_usuarios}</td>
               <td>${this._badgeStatus(o)}</td>
               <td><label class="switch"><input type="checkbox" class="chk-status" data-org="${o.org_id}" ${o.status !== 'suspenso' ? 'checked' : ''}><span class="slider"></span></label></td>
@@ -175,6 +148,24 @@ export const EmpresasUI = {
     });
     document.querySelectorAll('.btn-ver-auditoria').forEach(btn => {
       btn.onclick = () => onIrPara('auditoria', { org_id: btn.dataset.org });
+    });
+    document.querySelectorAll('.btn-aplicar-plano').forEach(btn => {
+      btn.onclick = async () => {
+        const org_id = btn.dataset.org;
+        const select = document.querySelector(`.sel-plano[data-org="${org_id}"]`);
+        const plano_key = select.value;
+        if (!plano_key) { toast.show('Escolha um plano primeiro.', 'error'); return; }
+        const plano = this._planos.find(p => p.plano_key === plano_key);
+        if (!confirm(`Aplicar o plano "${plano.nome}"? Isso substitui os módulos habilitados dessa empresa pelo pacote do plano.`)) return;
+        try {
+          await aplicarPlanoNaEmpresa(org_id, plano_key);
+          const org = this._lista.find(o => o.org_id === org_id);
+          org.plano = plano_key;
+          toast.show(`Plano "${plano.nome}" aplicado.`, 'success');
+        } catch (e) {
+          toast.show('Erro ao aplicar plano: ' + e.message, 'error');
+        }
+      };
     });
   },
 
