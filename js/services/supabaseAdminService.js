@@ -254,3 +254,40 @@ export async function restaurarExclusao(log) {
   if (error) throw new Error(error.message);
   return { success: true };
 }
+
+// ========== PLANOS ==========
+export async function getPlanos() {
+  const { data, error } = await supabase.from('planos').select('*').order('criado_em');
+  if (error) throw new Error(error.message);
+  return data || [];
+}
+
+export async function salvarPlano(payload) {
+  const { plano_key, ...formData } = payload;
+  const row = { ...formData };
+  row.plano_key = plano_key || `PLANO${Date.now()}`;
+  const { error } = await supabase.from('planos').upsert(row, { onConflict: 'plano_key' });
+  if (error) throw new Error(error.message);
+  return { success: true };
+}
+
+export async function excluirPlano(plano_key) {
+  const { error } = await supabase.from('planos').update({ ativo: 'NAO' }).eq('plano_key', plano_key);
+  if (error) throw new Error(error.message);
+  return { success: true };
+}
+
+// Aplica o plano numa empresa: seta organizations.plano E já espelha os
+// módulos do plano em org_modulos, tudo numa tacada (o botão "Aplicar
+// módulos do plano" na tela Empresas chama isso).
+export async function aplicarPlanoNaEmpresa(org_id, plano_key) {
+  const { data: plano, error: planoErr } = await supabase.from('planos').select('*').eq('plano_key', plano_key).maybeSingle();
+  if (planoErr) throw new Error(planoErr.message);
+  if (!plano) throw new Error('Plano não encontrado.');
+
+  const { error: orgErr } = await supabase.from('organizations').update({ plano: plano_key }).eq('org_id', org_id);
+  if (orgErr) throw new Error(orgErr.message);
+
+  await salvarModulosDaEmpresa(org_id, plano.modulos_json || []);
+  return { success: true, plano };
+}
