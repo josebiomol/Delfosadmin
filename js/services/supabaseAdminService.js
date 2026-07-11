@@ -204,6 +204,73 @@ export async function salvarModulosDaEmpresa(org_id, modulosHabilitados) {
   });
 }
 
+// ========== ACESSO DE SUPORTE (conta oculta por empresa) ==========
+// Conta de suporte/manutenção dentro da própria empresa (não é login mestre
+// — se vazar, só compromete aquela empresa). Login previsível
+// (_suporte_<org_id>), mas a segurança real é a senha aleatória, que é
+// mostrada 1 única vez na hora de gerar/redefinir e nunca fica salva em
+// texto puro em lugar nenhum (nem no log de auditoria).
+function _gerarSenhaAleatoria(tamanho = 14) {
+  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789!@#$%';
+  const valores = new Uint32Array(tamanho);
+  crypto.getRandomValues(valores);
+  return Array.from(valores, v => chars[v % chars.length]).join('');
+}
+
+// Retorna a conta de suporte da empresa, se existir (nunca inclui senha —
+// senha não fica salva em lugar nenhum além do hash no Supabase Auth).
+export async function getAcessoSuporte(org_id) {
+  const { data, error } = await supabase
+    .from('users')
+    .select('user_id, "Login", criado_em')
+    .eq('org_id', org_id)
+    .eq('oculto', 'SIM')
+    .maybeSingle();
+  if (error) throw new Error(error.message);
+  return data || null;
+}
+
+// Cria (1ª vez) ou redefine a senha (se já existir) da conta de suporte
+// dessa empresa. Retorna { login, senha } — a chamada em empresas.js é
+// responsável por mostrar isso só 1x e nunca guardar em lugar nenhum.
+export async function gerarOuRedefinirAcessoSuporte(org_id) {
+  return comRenovacaoDeSessao(async () => {
+    const { data: org } = await supabase.from('organizations').select('nome_fantasia, nome_org').eq('org_id', org_id).maybeSingle();
+    const existente = await getAcessoSuporte(org_id);
+    const senha = _gerarSenhaAleatoria();
+    const login = existente?.Login || `_suporte_${org_id}`;
+    const userIdFinal = existente?.user_id || `USR${Date.now()}`;
+    const email = `${login}@delfosquality.internal`;
+
+    const row = {
+      user_id: userIdFinal, org_id, nome: 'Suporte Delfos',
+      email, Login: login, role: 'admin', ativo: 'SIM', oculto: 'SIM',
+    };
+    const { data, error } = await supabase.from('users').upsert(row, { onConflict: 'user_id' }).select().single();
+    if (error) throw new Error(error.message);
+
+    // Mesma Edge Function que o app cliente usa pra criar/atualizar o
+    // login no Supabase Auth (service_role no servidor).
+    const { data: authResult, error: authFnErr } = await supabase.functions.invoke('auth-user-create', {
+      body: { email, password: senha, user_id: userIdFinal, org_id, auth_id: data.auth_id || null }
+    });
+    if (authFnErr || !authResult?.success) {
+      throw new Error('Usuário criado, mas o login no Auth falhou: ' + (authFnErr?.message || authResult?.error || 'erro desconhecido'));
+    }
+    if (authResult.auth_id) {
+      await supabase.from('users').update({ auth_id: authResult.auth_id }).eq('user_id', userIdFinal);
+    }
+
+    // Log NÃO inclui a senha — só o fato de que foi gerada/redefinida.
+    registrarLogAdmin({
+      acao: existente ? 'editar' : 'criar', entidade: 'acesso_suporte', entidade_id: org_id,
+      descricao: `${existente ? 'Redefiniu a senha do' : 'Gerou'} acesso de suporte pra "${org?.nome_fantasia || org?.nome_org || org_id}"`,
+    });
+
+    return { success: true, login, senha, criadoAgora: !existente };
+  });
+}
+
 // ========== AUDITORIA ==========
 export async function getAuditLogs({ org_id, user_ids, modulo, texto, data_inicio, data_fim, hora_inicio, hora_fim, limite = 100 } = {}) {
   let q = supabase.from('audit_logs').select('*').order('criado_em', { ascending: false }).limit(limite);
