@@ -19,6 +19,24 @@ const SUPABASE_ANON_KEY = 'sb_publishable_fhwicMVcRAqFJWhjW8wYcQ_4ctFrBtS';
 
 export const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
+// Se o login do painel ficar um tempo parado, o token de sessão vence e
+// qualquer gravação passa a ser barrada pela RLS (mensagem "new row
+// violates row-level security policy"), mesmo a pessoa continuando
+// logada visualmente. Em vez de obrigar a deslogar/logar de novo toda
+// vez que isso acontece, detecta esse erro específico, renova o token
+// sozinho e tenta a mesma operação de novo, 1 vez, sem o usuário notar.
+async function comRenovacaoDeSessao(fn) {
+  try {
+    return await fn();
+  } catch (e) {
+    const pareceExpirado = /row-level security policy/i.test(e.message || '');
+    if (!pareceExpirado) throw e;
+    const { error: refreshErr } = await supabase.auth.refreshSession();
+    if (refreshErr) throw e; // não deu pra renovar — mostra o erro original mesmo
+    return await fn(); // tenta de novo, já com sessão renovada
+  }
+}
+
 // ========== SESSÃO (própria, não mexe no localStorage do app cliente) ==========
 const SESSION_KEY = 'delfos_admin_session';
 
@@ -142,16 +160,18 @@ async function registrarLogAdmin({ acao, entidade, entidade_id, descricao }) {
 }
 
 export async function atualizarStatusOrganizacao(org_id, status) {
-  const { data: org } = await supabase.from('organizations').select('nome_fantasia, nome_org').eq('org_id', org_id).maybeSingle();
-  const { error } = await supabase.from('organizations').update({ status }).eq('org_id', org_id);
-  if (error) throw new Error(error.message);
+  return comRenovacaoDeSessao(async () => {
+    const { data: org } = await supabase.from('organizations').select('nome_fantasia, nome_org').eq('org_id', org_id).maybeSingle();
+    const { error } = await supabase.from('organizations').update({ status }).eq('org_id', org_id);
+    if (error) throw new Error(error.message);
 
-  registrarLogAdmin({
-    acao: 'editar', entidade: 'organizacao', entidade_id: org_id,
-    descricao: `Mudou o status de "${org?.nome_fantasia || org?.nome_org || org_id}" pra "${status}"`,
+    registrarLogAdmin({
+      acao: 'editar', entidade: 'organizacao', entidade_id: org_id,
+      descricao: `Mudou o status de "${org?.nome_fantasia || org?.nome_org || org_id}" pra "${status}"`,
+    });
+
+    return { success: true };
   });
-
-  return { success: true };
 }
 
 // ========== MÓDULOS POR EMPRESA ==========
@@ -162,24 +182,26 @@ export async function getModulosDaEmpresa(org_id) {
 }
 
 export async function salvarModulosDaEmpresa(org_id, modulosHabilitados) {
-  // modulosHabilitados: array de module_key habilitados (os que não vierem, ficam desabilitados)
-  const { data: org } = await supabase.from('organizations').select('nome_fantasia, nome_org').eq('org_id', org_id).maybeSingle();
-  await supabase.from('org_modulos').delete().eq('org_id', org_id);
-  if (modulosHabilitados.length) {
-    const rows = modulosHabilitados.map(key => ({
-      id: `ORGMOD${Date.now()}${key}`,
-      org_id, modulo_key: key, habilitado: 'SIM',
-    }));
-    const { error } = await supabase.from('org_modulos').insert(rows);
-    if (error) throw new Error(error.message);
-  }
+  return comRenovacaoDeSessao(async () => {
+    // modulosHabilitados: array de module_key habilitados (os que não vierem, ficam desabilitados)
+    const { data: org } = await supabase.from('organizations').select('nome_fantasia, nome_org').eq('org_id', org_id).maybeSingle();
+    await supabase.from('org_modulos').delete().eq('org_id', org_id);
+    if (modulosHabilitados.length) {
+      const rows = modulosHabilitados.map(key => ({
+        id: `ORGMOD${Date.now()}${key}`,
+        org_id, modulo_key: key, habilitado: 'SIM',
+      }));
+      const { error } = await supabase.from('org_modulos').insert(rows);
+      if (error) throw new Error(error.message);
+    }
 
-  registrarLogAdmin({
-    acao: 'editar', entidade: 'org_modulos', entidade_id: org_id,
-    descricao: `Ajustou os módulos habilitados de "${org?.nome_fantasia || org?.nome_org || org_id}" (${modulosHabilitados.length} módulo(s) habilitado(s))`,
+    registrarLogAdmin({
+      acao: 'editar', entidade: 'org_modulos', entidade_id: org_id,
+      descricao: `Ajustou os módulos habilitados de "${org?.nome_fantasia || org?.nome_org || org_id}" (${modulosHabilitados.length} módulo(s) habilitado(s))`,
+    });
+
+    return { success: true };
   });
-
-  return { success: true };
 }
 
 // ========== AUDITORIA ==========
@@ -263,12 +285,14 @@ export async function getPlanos() {
 }
 
 export async function salvarPlano(payload) {
-  const { plano_key, ...formData } = payload;
-  const row = { ...formData };
-  row.plano_key = plano_key || `PLANO${Date.now()}`;
-  const { error } = await supabase.from('planos').upsert(row, { onConflict: 'plano_key' });
-  if (error) throw new Error(error.message);
-  return { success: true };
+  return comRenovacaoDeSessao(async () => {
+    const { plano_key, ...formData } = payload;
+    const row = { ...formData };
+    row.plano_key = plano_key || `PLANO${Date.now()}`;
+    const { error } = await supabase.from('planos').upsert(row, { onConflict: 'plano_key' });
+    if (error) throw new Error(error.message);
+    return { success: true };
+  });
 }
 
 export async function excluirPlano(plano_key) {
@@ -282,19 +306,21 @@ export async function excluirPlano(plano_key) {
 // Configurações que vieram do Segmento (são fatias independentes, uma
 // não apaga a outra).
 export async function aplicarPlanoNaEmpresa(org_id, plano_key) {
-  const { data: plano, error: planoErr } = await supabase.from('planos').select('*').eq('plano_key', plano_key).maybeSingle();
-  if (planoErr) throw new Error(planoErr.message);
-  if (!plano) throw new Error('Plano não encontrado.');
+  return comRenovacaoDeSessao(async () => {
+    const { data: plano, error: planoErr } = await supabase.from('planos').select('*').eq('plano_key', plano_key).maybeSingle();
+    if (planoErr) throw new Error(planoErr.message);
+    if (!plano) throw new Error('Plano não encontrado.');
 
-  const { error: orgErr } = await supabase.from('organizations').update({ plano: plano_key }).eq('org_id', org_id);
-  if (orgErr) throw new Error(orgErr.message);
+    const { error: orgErr } = await supabase.from('organizations').update({ plano: plano_key }).eq('org_id', org_id);
+    if (orgErr) throw new Error(orgErr.message);
 
-  const todasSubtelas = (await getSubtelas()).map(s => s.subtela_key);
-  const { data: atuais } = await supabase.from('org_modulos').select('modulo_key').eq('org_id', org_id);
-  const subtelasAtuais = (atuais || []).map(m => m.modulo_key).filter(k => todasSubtelas.includes(k));
+    const todasSubtelas = (await getSubtelas()).map(s => s.subtela_key);
+    const { data: atuais } = await supabase.from('org_modulos').select('modulo_key').eq('org_id', org_id);
+    const subtelasAtuais = (atuais || []).map(m => m.modulo_key).filter(k => todasSubtelas.includes(k));
 
-  await salvarModulosDaEmpresa(org_id, [...(plano.modulos_json || []), ...subtelasAtuais]);
-  return { success: true, plano };
+    await salvarModulosDaEmpresa(org_id, [...(plano.modulos_json || []), ...subtelasAtuais]);
+    return { success: true, plano };
+  });
 }
 
 // ========== SUB-TELAS DE CONFIGURAÇÃO (registro dinâmico) ==========
@@ -305,10 +331,12 @@ export async function getSubtelas() {
 }
 
 export async function salvarSubtela({ subtela_key, label }) {
-  const key = subtela_key || `subtela_${label.toLowerCase().replace(/[^a-z0-9]+/g, '_')}`;
-  const { error } = await supabase.from('subtelas_configuracao').upsert({ subtela_key: key, label }, { onConflict: 'subtela_key' });
-  if (error) throw new Error(error.message);
-  return { success: true };
+  return comRenovacaoDeSessao(async () => {
+    const key = subtela_key || `subtela_${label.toLowerCase().replace(/[^a-z0-9]+/g, '_')}`;
+    const { error } = await supabase.from('subtelas_configuracao').upsert({ subtela_key: key, label }, { onConflict: 'subtela_key' });
+    if (error) throw new Error(error.message);
+    return { success: true };
+  });
 }
 
 export async function excluirSubtela(subtela_key) {
@@ -325,12 +353,14 @@ export async function getSegmentos() {
 }
 
 export async function salvarSegmento(payload) {
-  const { segmento_key, ...formData } = payload;
-  const row = { ...formData };
-  row.segmento_key = segmento_key || `SEG${Date.now()}`;
-  const { error } = await supabase.from('segmentos').upsert(row, { onConflict: 'segmento_key' });
-  if (error) throw new Error(error.message);
-  return { success: true };
+  return comRenovacaoDeSessao(async () => {
+    const { segmento_key, ...formData } = payload;
+    const row = { ...formData };
+    row.segmento_key = segmento_key || `SEG${Date.now()}`;
+    const { error } = await supabase.from('segmentos').upsert(row, { onConflict: 'segmento_key' });
+    if (error) throw new Error(error.message);
+    return { success: true };
+  });
 }
 
 export async function excluirSegmento(segmento_key) {
@@ -343,17 +373,19 @@ export async function excluirSegmento(segmento_key) {
 // as sub-telas dele em org_modulos — preservando os módulos principais
 // que vieram do Plano.
 export async function aplicarSegmentoNaEmpresa(org_id, segmento_key) {
-  const { data: segmento, error: segErr } = await supabase.from('segmentos').select('*').eq('segmento_key', segmento_key).maybeSingle();
-  if (segErr) throw new Error(segErr.message);
-  if (!segmento) throw new Error('Segmento não encontrado.');
+  return comRenovacaoDeSessao(async () => {
+    const { data: segmento, error: segErr } = await supabase.from('segmentos').select('*').eq('segmento_key', segmento_key).maybeSingle();
+    if (segErr) throw new Error(segErr.message);
+    if (!segmento) throw new Error('Segmento não encontrado.');
 
-  const { error: orgErr } = await supabase.from('organizations').update({ segmento: segmento_key }).eq('org_id', org_id);
-  if (orgErr) throw new Error(orgErr.message);
+    const { error: orgErr } = await supabase.from('organizations').update({ segmento: segmento_key }).eq('org_id', org_id);
+    if (orgErr) throw new Error(orgErr.message);
 
-  const todasSubtelas = (await getSubtelas()).map(s => s.subtela_key);
-  const { data: atuais } = await supabase.from('org_modulos').select('modulo_key').eq('org_id', org_id);
-  const modulosPrincipaisAtuais = (atuais || []).map(m => m.modulo_key).filter(k => !todasSubtelas.includes(k));
+    const todasSubtelas = (await getSubtelas()).map(s => s.subtela_key);
+    const { data: atuais } = await supabase.from('org_modulos').select('modulo_key').eq('org_id', org_id);
+    const modulosPrincipaisAtuais = (atuais || []).map(m => m.modulo_key).filter(k => !todasSubtelas.includes(k));
 
-  await salvarModulosDaEmpresa(org_id, [...modulosPrincipaisAtuais, ...(segmento.subtelas_json || [])]);
-  return { success: true, segmento };
+    await salvarModulosDaEmpresa(org_id, [...modulosPrincipaisAtuais, ...(segmento.subtelas_json || [])]);
+    return { success: true, segmento };
+  });
 }
