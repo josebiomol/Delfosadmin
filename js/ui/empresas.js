@@ -275,15 +275,12 @@ export const EmpresasUI = {
         document.getElementById('suporteBody').innerHTML = `
           <div class="empty" style="border:1px solid #f59e0b;text-align:left;padding:14px">
             <strong style="color:#f59e0b">⚠️ Senha visível só agora — copie antes de fechar</strong>
-            <div style="display:flex;justify-content:space-between;margin-top:10px;font-size:13px">
-              <span>Login</span><code>${escapeHTML(r.login)}</code>
-            </div>
-            <div style="display:flex;justify-content:space-between;align-items:center;margin-top:6px;font-size:13px">
-              <span>Senha</span>
-              <span style="display:flex;align-items:center;gap:8px">
-                <code id="senhaSuporteGerada">${escapeHTML(r.senha)}</code>
+            <div style="margin-top:12px;font-size:14px;line-height:1.8">
+              <div><strong>Login:</strong> <code>${escapeHTML(r.login)}</code></div>
+              <div style="display:flex;align-items:center;gap:8px">
+                <strong>Senha:</strong> <code id="senhaSuporteGerada">${escapeHTML(r.senha)}</code>
                 <button class="link-btn" id="btnCopiarSenhaSuporte">Copiar</button>
-              </span>
+              </div>
             </div>
           </div>
           <div class="modal-actions"><button class="btn btn-primary" id="btnFecharSuporteFinal">Fechar</button></div>`;
