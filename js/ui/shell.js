@@ -19,13 +19,15 @@ export const ShellUI = {
     return `
       <div class="sidebar">
         <div class="brand"><i class="fa-solid fa-shield-halved"></i> Delfos <span class="admin-pill">Admin</span></div>
-        ${Object.entries(VIEWS).map(([key, v]) => `
-          <div class="nav-item ${key === this._viewAtual ? 'active' : ''}" data-view="${key}">
-            <i class="fa-solid ${v.icon}"></i> ${v.label}
-          </div>`).join('')}
+        <div class="sidebar-nav">
+          ${Object.entries(VIEWS).map(([key, v]) => `
+            <div class="nav-item ${key === this._viewAtual ? 'active' : ''}" data-view="${key}">
+              <i class="fa-solid ${v.icon}"></i> ${v.label}
+            </div>`).join('')}
+        </div>
         <div class="nav-footer">
-          ${escapeHTML(admin.nome)}<br>dono da plataforma
-          <br><span class="logout" id="btnLogout">Sair</span>
+          <span class="nav-footer-nome">${escapeHTML(admin.nome)} <span class="nav-footer-cargo">· dono da plataforma</span></span>
+          <span class="logout" id="btnLogout">Sair</span>
         </div>
       </div>
       <div class="main" id="mainContent"><div class="loading"><i class="fa-solid fa-spinner fa-spin"></i> Carregando...</div></div>
