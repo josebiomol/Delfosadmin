@@ -13,7 +13,7 @@ export const AuditoriaUI = {
   _logs: [],
   _empresas: [],
   _usuariosResolvidos: {}, // user_id -> {nome, login}
-  _filtro: { org_id: '', modulo: '', texto: '', data_inicio: '', data_fim: '', usuarioTexto: '' },
+  _filtro: { org_id: '', modulo: '', texto: '', data_inicio: '', data_fim: '', hora_inicio: '', hora_fim: '', usuarioTexto: '' },
   _buscou: false, // só true depois que o admin clicou em "Buscar" pelo menos 1x
 
   // Carrega só o essencial pra montar os filtros (lista de empresas) —
@@ -32,10 +32,13 @@ export const AuditoriaUI = {
 
       <div class="toolbar">
         <input id="fAudInicio" class="select" type="date" style="max-width:150px" value="${this._filtro.data_inicio}">
+        <input id="fAudHoraInicio" class="select" type="time" style="max-width:110px" value="${this._filtro.hora_inicio}">
         <span style="color:var(--muted);font-size:12px">até</span>
         <input id="fAudFim" class="select" type="date" style="max-width:150px" value="${this._filtro.data_fim}">
+        <input id="fAudHoraFim" class="select" type="time" style="max-width:110px" value="${this._filtro.hora_fim}">
         <select id="fAudEmpresa" class="select">
           <option value="">Empresa: Todas</option>
+          <option value="PLATAFORMA" ${this._filtro.org_id === 'PLATAFORMA' ? 'selected' : ''}>⚙️ Ações do painel admin</option>
           ${this._empresas.map(o => `<option value="${o.org_id}" ${o.org_id === this._filtro.org_id ? 'selected' : ''}>${escapeHTML(o.nome_fantasia || o.nome_org)}</option>`).join('')}
         </select>
         <input id="fAudUsuario" class="input" placeholder="Usuário (nome ou login)..." value="${escapeHTML(this._filtro.usuarioTexto)}" style="max-width:200px">
@@ -94,7 +97,9 @@ export const AuditoriaUI = {
     // busca sozinho. A busca só roda quando "Buscar" é clicado.
     const lerFiltrosDaTela = () => {
       this._filtro.data_inicio = document.getElementById('fAudInicio').value;
+      this._filtro.hora_inicio = document.getElementById('fAudHoraInicio').value;
       this._filtro.data_fim = document.getElementById('fAudFim').value;
+      this._filtro.hora_fim = document.getElementById('fAudHoraFim').value;
       this._filtro.org_id = document.getElementById('fAudEmpresa').value;
       this._filtro.usuarioTexto = document.getElementById('fAudUsuario').value;
       this._filtro.texto = document.getElementById('fAudTexto').value;
@@ -141,11 +146,13 @@ export const AuditoriaUI = {
     });
 
     document.getElementById('btnLimparAud').addEventListener('click', () => {
-      this._filtro = { org_id: '', modulo: '', texto: '', data_inicio: '', data_fim: '', usuarioTexto: '' };
+      this._filtro = { org_id: '', modulo: '', texto: '', data_inicio: '', data_fim: '', hora_inicio: '', hora_fim: '', usuarioTexto: '' };
       this._logs = [];
       this._buscou = false;
       document.getElementById('fAudInicio').value = '';
+      document.getElementById('fAudHoraInicio').value = '';
       document.getElementById('fAudFim').value = '';
+      document.getElementById('fAudHoraFim').value = '';
       document.getElementById('fAudEmpresa').value = '';
       document.getElementById('fAudUsuario').value = '';
       document.getElementById('fAudTexto').value = '';
