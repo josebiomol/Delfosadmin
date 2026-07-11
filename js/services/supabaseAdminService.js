@@ -115,9 +115,35 @@ export async function getOrganizacoes({ busca, status } = {}) {
   return comContagem;
 }
 
+// ========== LOG DAS AÇÕES DO PRÓPRIO PAINEL ADMIN ==========
+// Registra em audit_logs com org_id = 'PLATAFORMA' (não pertence a
+// nenhuma empresa) — assim dá pra distinguir na tela de Auditoria entre
+// "ação de usuário de empresa" e "ação do dono da plataforma".
+async function registrarLogAdmin({ acao, entidade, entidade_id, descricao }) {
+  const admin = getAdminSession();
+  try {
+    const { error } = await supabase.from('audit_logs').insert({
+      log_id: `LOG${Date.now()}`,
+      org_id: 'PLATAFORMA', unidade_id: null, user_id: admin?.admin_id || 'desconhecido',
+      modulo: 'delfos_admin', acao, entidade, entidade_id: entidade_id || null,
+      descricao: `[${admin?.nome || 'admin'}] ${descricao}`,
+    });
+    if (error) console.error('⚠️ Falha ao gravar log do admin:', error.message);
+  } catch (e) {
+    console.error('⚠️ Exceção ao gravar log do admin:', e.message);
+  }
+}
+
 export async function atualizarStatusOrganizacao(org_id, status) {
+  const { data: org } = await supabase.from('organizations').select('nome_fantasia, nome_org').eq('org_id', org_id).maybeSingle();
   const { error } = await supabase.from('organizations').update({ status }).eq('org_id', org_id);
   if (error) throw new Error(error.message);
+
+  registrarLogAdmin({
+    acao: 'editar', entidade: 'organizacao', entidade_id: org_id,
+    descricao: `Mudou o status de "${org?.nome_fantasia || org?.nome_org || org_id}" pra "${status}"`,
+  });
+
   return { success: true };
 }
 
@@ -130,22 +156,30 @@ export async function getModulosDaEmpresa(org_id) {
 
 export async function salvarModulosDaEmpresa(org_id, modulosHabilitados) {
   // modulosHabilitados: array de module_key habilitados (os que não vierem, ficam desabilitados)
+  const { data: org } = await supabase.from('organizations').select('nome_fantasia, nome_org').eq('org_id', org_id).maybeSingle();
   await supabase.from('org_modulos').delete().eq('org_id', org_id);
-  if (!modulosHabilitados.length) return { success: true };
-  const rows = modulosHabilitados.map(key => ({
-    id: `ORGMOD${Date.now()}${key}`,
-    org_id, modulo_key: key, habilitado: 'SIM',
-  }));
-  const { error } = await supabase.from('org_modulos').insert(rows);
-  if (error) throw new Error(error.message);
+  if (modulosHabilitados.length) {
+    const rows = modulosHabilitados.map(key => ({
+      id: `ORGMOD${Date.now()}${key}`,
+      org_id, modulo_key: key, habilitado: 'SIM',
+    }));
+    const { error } = await supabase.from('org_modulos').insert(rows);
+    if (error) throw new Error(error.message);
+  }
+
+  registrarLogAdmin({
+    acao: 'editar', entidade: 'org_modulos', entidade_id: org_id,
+    descricao: `Ajustou os módulos habilitados de "${org?.nome_fantasia || org?.nome_org || org_id}" (${modulosHabilitados.length} módulo(s) habilitado(s))`,
+  });
+
   return { success: true };
 }
 
 // ========== AUDITORIA ==========
-export async function getAuditLogs({ org_id, user_id, modulo, texto, data_inicio, data_fim, limite = 100 } = {}) {
+export async function getAuditLogs({ org_id, user_ids, modulo, texto, data_inicio, data_fim, limite = 100 } = {}) {
   let q = supabase.from('audit_logs').select('*').order('criado_em', { ascending: false }).limit(limite);
   if (org_id) q = q.eq('org_id', org_id);
-  if (user_id) q = q.eq('user_id', user_id);
+  if (Array.isArray(user_ids) && user_ids.length) q = q.in('user_id', user_ids);
   if (modulo) q = q.eq('modulo', modulo);
   if (data_inicio) q = q.gte('criado_em', data_inicio + 'T00:00:00');
   if (data_fim) q = q.lte('criado_em', data_fim + 'T23:59:59');
@@ -157,6 +191,33 @@ export async function getAuditLogs({ org_id, user_id, modulo, texto, data_inicio
     lista = lista.filter(l => (l.descricao || '').toLowerCase().includes(termo));
   }
   return lista;
+}
+
+// Busca usuários do app cliente por nome ou login — usado pelo filtro de
+// Auditoria (o admin digita um nome, a gente resolve pra user_id(s) antes
+// de consultar audit_logs). Coluna real no banco é "Login" (L maiúsculo).
+export async function buscarUsuariosPorTermo(termo) {
+  if (!termo || !termo.trim()) return [];
+  const t = termo.trim();
+  const { data, error } = await supabase
+    .from('users')
+    .select('user_id, nome, Login')
+    .or(`nome.ilike.%${t}%,Login.ilike.%${t}%`)
+    .limit(20);
+  if (error) throw new Error(error.message);
+  return data || [];
+}
+
+// Resolve user_id -> {nome, login} pra exibir na tabela de auditoria em
+// vez do ID cru. Só busca os IDs que realmente aparecem nos logs carregados.
+export async function resolverUsuarios(userIds) {
+  const ids = [...new Set(userIds)].filter(Boolean);
+  if (!ids.length) return {};
+  const { data, error } = await supabase.from('users').select('user_id, nome, Login').in('user_id', ids);
+  if (error) { console.error('⚠️ Falha ao resolver usuários:', error.message); return {}; }
+  const mapa = {};
+  (data || []).forEach(u => { mapa[u.user_id] = { nome: u.nome, login: u.Login }; });
+  return mapa;
 }
 
 // Restaura uma exclusão logada — só funciona pra ações do tipo 'excluir'
