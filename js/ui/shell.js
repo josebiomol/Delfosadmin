@@ -1,12 +1,14 @@
 import { DashboardUI } from './dashboard.js';
 import { EmpresasUI } from './empresas.js';
 import { AuditoriaUI } from './auditoria.js';
+import { PlanosUI } from './planos.js';
 import { logoutAdmin } from '../services/supabaseAdminService.js';
 import { escapeHTML } from '../utils/escapeHTML.js';
 
 const VIEWS = {
   dashboard: { label: 'Painel inicial', icon: 'fa-gauge-high', modulo: DashboardUI },
   empresas: { label: 'Empresas', icon: 'fa-building', modulo: EmpresasUI },
+  planos: { label: 'Planos', icon: 'fa-layer-group', modulo: PlanosUI },
   auditoria: { label: 'Auditoria', icon: 'fa-clock-rotate-left', modulo: AuditoriaUI },
 };
 
@@ -73,6 +75,10 @@ export const ShellUI = {
         await view.modulo.carregar(filtroInicial);
         main.innerHTML = view.modulo.render();
         view.modulo.bind((destino, filtro) => this._irPara(destino, filtro));
+      } else if (this._viewAtual === 'planos') {
+        await view.modulo.carregar();
+        main.innerHTML = view.modulo.render();
+        view.modulo.bind();
       }
     } catch (e) {
       main.innerHTML = `<div class="empty">Erro ao carregar: ${escapeHTML(e.message)}</div>`;
