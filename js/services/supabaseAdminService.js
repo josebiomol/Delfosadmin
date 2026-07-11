@@ -210,6 +210,29 @@ export async function salvarModulosDaEmpresa(org_id, modulosHabilitados) {
 // (_suporte_<org_id>), mas a segurança real é a senha aleatória, que é
 // mostrada 1 única vez na hora de gerar/redefinir e nunca fica salva em
 // texto puro em lugar nenhum (nem no log de auditoria).
+//
+// Cópia manual das flags/módulos do app cliente (mesmo padrão já usado em
+// modulosLista.js) — se um módulo ou flag nova for adicionado lá
+// (permissionFlags.js / menuModules.js), replicar aqui também, senão a
+// conta de suporte nasce sem acesso a essa coisa nova.
+const PERMISSAO_FLAGS_KEYS = [
+  // agendamento
+  'view_dashboard', 'view_appointments', 'add_appointment', 'edit_appointment', 'delete_appointment',
+  'view_blocked_dates', 'add_blocked_date', 'edit_blocked_date', 'delete_blocked_date',
+  // configuracoes
+  'view_usuarios', 'view_hospitais', 'view_medicos', 'view_convenios', 'view_procedimentos',
+  'view_status', 'view_motivos', 'view_grupos', 'view_setores', 'view_unidades', 'add_unidade',
+  'edit_own_profile', 'view_auditoria', 'view_classificacoes_sprint',
+];
+const MODULOS_GENERICOS_KEYS = [
+  'gestao_estrategica', // já implementado, mas fora de agendamento/configuracoes — usa ação genérica
+  'gestao_processos', 'gestao_riscos', 'gestao_ocorrencias', 'gestao_planos_acoes',
+  'gestao_indicadores', 'gestao_auditorias', 'gestao_treinamentos', 'gestao_acidentes',
+  'recursos_humanos', 'gestao_atendimento_cliente', 'gestao_reunioes', 'gestao_ordem_servico',
+  'gestao_patrimonio', 'controle_agua', 'gestao_temp_umidade', 'gestao_fornecedores_produtos',
+  'gestao_fornecedores_servicos', 'modelo_canvas', 'cadeia_valor', 'gestao_mudanca_inovacao',
+];
+
 function _gerarSenhaAleatoria(tamanho = 14) {
   const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789!@#$%';
   const valores = new Uint32Array(tamanho);
@@ -238,7 +261,7 @@ export async function gerarOuRedefinirAcessoSuporte(org_id) {
     const { data: org } = await supabase.from('organizations').select('nome_fantasia, nome_org').eq('org_id', org_id).maybeSingle();
     const existente = await getAcessoSuporte(org_id);
     const senha = _gerarSenhaAleatoria();
-    const login = existente?.Login || `_suporte_${org_id}`;
+    const login = existente?.Login || `suporte_${org_id}`;
     const userIdFinal = existente?.user_id || `USR${Date.now()}`;
     const email = `${login}@delfosquality.internal`;
 
@@ -248,6 +271,39 @@ export async function gerarOuRedefinirAcessoSuporte(org_id) {
     };
     const { data, error } = await supabase.from('users').upsert(row, { onConflict: 'user_id' }).select().single();
     if (error) throw new Error(error.message);
+
+    // Confere e completa o que faltar (idempotente) — cobre tanto a 1ª
+    // criação quanto contas antigas que porventura já existiam sem
+    // unidade/permissão vinculada (não duplica o que já está lá).
+    const { data: unidadesOrg, error: undErr } = await supabase
+      .from('unidades').select('unidade_id').eq('org_id', org_id).eq('ativo', 'SIM');
+    if (undErr) throw new Error('Usuário salvo, mas falhou ao buscar unidades: ' + undErr.message);
+
+    const { data: jaVinculadas } = await supabase
+      .from('usuarios_unidades').select('unidade_id').eq('user_id', userIdFinal).eq('ativo', 'SIM');
+    const idsJaVinculados = new Set((jaVinculadas || []).map(v => v.unidade_id));
+    const faltantes = (unidadesOrg || []).filter(u => !idsJaVinculados.has(u.unidade_id));
+    if (faltantes.length) {
+      const rowsUnidades = faltantes.map(u => ({
+        id: `UU${Date.now()}${u.unidade_id}`, user_id: userIdFinal, org_id, unidade_id: u.unidade_id, ativo: 'SIM',
+      }));
+      const { error: uuErr } = await supabase.from('usuarios_unidades').insert(rowsUnidades);
+      if (uuErr) throw new Error('Usuário salvo, mas falhou ao vincular unidades: ' + uuErr.message);
+    }
+
+    const { data: permExistente } = await supabase
+      .from('permissoes_usuarios').select('permissao_id').eq('user_id', userIdFinal).eq('ativo', 'SIM').maybeSingle();
+    if (!permExistente) {
+      const flatPerms = {};
+      PERMISSAO_FLAGS_KEYS.forEach(k => { flatPerms[k] = true; });
+      const modulosPerms = {};
+      MODULOS_GENERICOS_KEYS.forEach(k => { modulosPerms[k] = { acessar: true, cadastrar: true, editar: true, excluir: true }; });
+      const { error: permErr } = await supabase.from('permissoes_usuarios').insert({
+        permissao_id: `PERM${Date.now()}`, user_id: userIdFinal, org_id, unidade_id: null,
+        permissoes_json: JSON.stringify({ ...flatPerms, modulos: modulosPerms }), ativo: 'SIM',
+      });
+      if (permErr) throw new Error('Usuário salvo, mas falhou ao gravar permissões: ' + permErr.message);
+    }
 
     // Mesma Edge Function que o app cliente usa pra criar/atualizar o
     // login no Supabase Auth (service_role no servidor).
