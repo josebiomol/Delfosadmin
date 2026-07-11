@@ -74,6 +74,7 @@ export const EmpresasUI = {
   _renderTabela() {
     if (!this._lista.length) return `<div class="empty">Nenhuma empresa encontrada.</div>`;
     return `
+      <div class="table-wrap">
       <table>
         <thead>
           <tr>
@@ -98,7 +99,8 @@ export const EmpresasUI = {
               <td><button class="link-btn btn-ver-auditoria" data-org="${o.org_id}">Ver logs</button></td>
             </tr>`).join('')}
         </tbody>
-      </table>`;
+      </table>
+      </div>`;
   },
 
   _badgeStatus(o) {
