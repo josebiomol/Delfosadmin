@@ -181,8 +181,14 @@ export async function getAuditLogs({ org_id, user_ids, modulo, texto, data_inici
   if (org_id) q = q.eq('org_id', org_id);
   if (Array.isArray(user_ids) && user_ids.length) q = q.in('user_id', user_ids);
   if (modulo) q = q.eq('modulo', modulo);
-  if (data_inicio) q = q.gte('criado_em', `${data_inicio}T${hora_inicio || '00:00'}:00`);
-  if (data_fim) q = q.lte('criado_em', `${data_fim}T${hora_fim || '23:59'}:59`);
+  if (data_inicio) {
+    const dtIni = new Date(`${data_inicio}T${hora_inicio || '00:00'}:00`);
+    q = q.gte('criado_em', dtIni.toISOString());
+  }
+  if (data_fim) {
+    const dtFim = new Date(`${data_fim}T${hora_fim || '23:59'}:59`);
+    q = q.lte('criado_em', dtFim.toISOString());
+  }
   const { data, error } = await q;
   if (error) throw new Error(error.message);
   let lista = data || [];
