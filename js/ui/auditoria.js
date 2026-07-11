@@ -49,6 +49,7 @@ export const AuditoriaUI = {
   _renderTabela() {
     if (!this._logs.length) return `<div class="empty">Nenhuma ação encontrada com esse filtro.</div>`;
     return `
+      <div class="table-wrap">
       <table>
         <thead>
           <tr>
@@ -77,7 +78,8 @@ export const AuditoriaUI = {
             </tr>`;
           }).join('')}
         </tbody>
-      </table>`;
+      </table>
+      </div>`;
   },
 
   bind(onIrPara) {
