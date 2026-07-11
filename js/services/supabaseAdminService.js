@@ -176,13 +176,13 @@ export async function salvarModulosDaEmpresa(org_id, modulosHabilitados) {
 }
 
 // ========== AUDITORIA ==========
-export async function getAuditLogs({ org_id, user_ids, modulo, texto, data_inicio, data_fim, limite = 100 } = {}) {
+export async function getAuditLogs({ org_id, user_ids, modulo, texto, data_inicio, data_fim, hora_inicio, hora_fim, limite = 100 } = {}) {
   let q = supabase.from('audit_logs').select('*').order('criado_em', { ascending: false }).limit(limite);
   if (org_id) q = q.eq('org_id', org_id);
   if (Array.isArray(user_ids) && user_ids.length) q = q.in('user_id', user_ids);
   if (modulo) q = q.eq('modulo', modulo);
-  if (data_inicio) q = q.gte('criado_em', data_inicio + 'T00:00:00');
-  if (data_fim) q = q.lte('criado_em', data_fim + 'T23:59:59');
+  if (data_inicio) q = q.gte('criado_em', `${data_inicio}T${hora_inicio || '00:00'}:00`);
+  if (data_fim) q = q.lte('criado_em', `${data_fim}T${hora_fim || '23:59'}:59`);
   const { data, error } = await q;
   if (error) throw new Error(error.message);
   let lista = data || [];
