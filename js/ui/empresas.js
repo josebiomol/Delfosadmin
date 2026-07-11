@@ -3,6 +3,7 @@ import {
   getModulosDaEmpresa, salvarModulosDaEmpresa,
   getPlanos, aplicarPlanoNaEmpresa,
   getSegmentos, aplicarSegmentoNaEmpresa,
+  getAcessoSuporte, gerarOuRedefinirAcessoSuporte,
 } from '../services/supabaseAdminService.js';
 import { escapeHTML } from '../utils/escapeHTML.js';
 import { toast } from '../utils/toast.js';
@@ -59,6 +60,7 @@ export const EmpresasUI = {
             <th>Status</th>
             <th style="width:110px">Ativo</th>
             <th style="width:150px">Módulos</th>
+            <th style="width:120px">Suporte</th>
             <th style="width:90px">Auditoria</th>
           </tr>
         </thead>
@@ -84,6 +86,7 @@ export const EmpresasUI = {
               <td>${this._badgeStatus(o)}</td>
               <td><label class="switch"><input type="checkbox" class="chk-status" data-org="${o.org_id}" ${o.status !== 'suspenso' ? 'checked' : ''}><span class="slider"></span></label></td>
               <td><button class="link-btn btn-modulos" data-org="${o.org_id}" data-nome="${escapeHTML(o.nome_fantasia || o.nome_org)}"><i class="fa-solid fa-list-check"></i> Ver módulos</button></td>
+              <td><button class="link-btn btn-suporte" data-org="${o.org_id}" data-nome="${escapeHTML(o.nome_fantasia || o.nome_org)}"><i class="fa-solid fa-user-shield"></i> Acesso</button></td>
               <td><button class="link-btn btn-ver-auditoria" data-org="${o.org_id}">Ver logs</button></td>
             </tr>`).join('')}
         </tbody>
@@ -157,6 +160,9 @@ export const EmpresasUI = {
     });
     document.querySelectorAll('.btn-modulos').forEach(btn => {
       btn.onclick = () => this._abrirModalModulos(btn.dataset.org, btn.dataset.nome);
+    });
+    document.querySelectorAll('.btn-suporte').forEach(btn => {
+      btn.onclick = () => this._abrirModalSuporte(btn.dataset.org, btn.dataset.nome);
     });
     document.querySelectorAll('.btn-ver-auditoria').forEach(btn => {
       btn.onclick = () => onIrPara('auditoria', { org_id: btn.dataset.org });
@@ -241,5 +247,92 @@ export const EmpresasUI = {
         toast.show('Erro ao salvar módulos: ' + e.message, 'error');
       }
     };
+  },
+
+  // Conta oculta de suporte por empresa — 3 estados: sem acesso ainda,
+  // já existe (oferece redefinir), e "senha visível só agora" depois de
+  // gerar/redefinir. A senha nunca fica salva em nenhum lugar em texto
+  // puro — só aparece nessa tela, uma vez, logo após ser gerada.
+  async _abrirModalSuporte(org_id, nomeEmpresa) {
+    const overlayId = 'modalSuporteEmpresa';
+    document.getElementById(overlayId)?.remove();
+    const html = `
+      <div id="${overlayId}" class="overlay">
+        <div class="modal">
+          <h3>Acesso de suporte — ${escapeHTML(nomeEmpresa)}</h3>
+          <p class="sub">Conta oculta pra entrar como se fosse essa empresa. Não aparece na lista de Usuários do cliente.</p>
+          <div id="suporteBody"><div class="loading"><i class="fa-solid fa-spinner fa-spin"></i> Carregando...</div></div>
+        </div>
+      </div>`;
+    document.body.insertAdjacentHTML('beforeend', html);
+    const overlay = document.getElementById(overlayId);
+    overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.remove(); });
+
+    const gerar = async () => {
+      document.getElementById('suporteBody').innerHTML = `<div class="loading"><i class="fa-solid fa-spinner fa-spin"></i> Gerando...</div>`;
+      try {
+        const r = await gerarOuRedefinirAcessoSuporte(org_id);
+        document.getElementById('suporteBody').innerHTML = `
+          <div class="empty" style="border:1px solid #f59e0b;text-align:left;padding:14px">
+            <strong style="color:#f59e0b">⚠️ Senha visível só agora — copie antes de fechar</strong>
+            <div style="display:flex;justify-content:space-between;margin-top:10px;font-size:13px">
+              <span>Login</span><code>${escapeHTML(r.login)}</code>
+            </div>
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-top:6px;font-size:13px">
+              <span>Senha</span>
+              <span style="display:flex;align-items:center;gap:8px">
+                <code id="senhaSuporteGerada">${escapeHTML(r.senha)}</code>
+                <button class="link-btn" id="btnCopiarSenhaSuporte">Copiar</button>
+              </span>
+            </div>
+          </div>
+          <div class="modal-actions"><button class="btn btn-primary" id="btnFecharSuporteFinal">Fechar</button></div>`;
+        document.getElementById('btnCopiarSenhaSuporte').onclick = () => {
+          navigator.clipboard.writeText(r.senha);
+          toast.show('Senha copiada.', 'success');
+        };
+        document.getElementById('btnFecharSuporteFinal').onclick = () => overlay.remove();
+        toast.show(r.criadoAgora ? 'Acesso de suporte gerado.' : 'Senha redefinida.', 'success');
+      } catch (e) {
+        toast.show('Erro: ' + e.message, 'error');
+        renderEstadoInicial();
+      }
+    };
+
+    const renderEstadoInicial = async () => {
+      let existente;
+      try {
+        existente = await getAcessoSuporte(org_id);
+      } catch (e) {
+        document.getElementById('suporteBody').innerHTML = `
+          <p class="sub" style="color:var(--danger)">Erro ao consultar: ${escapeHTML(e.message)}</p>
+          <div class="modal-actions"><button class="btn" id="btnFecharSuporte">Fechar</button></div>`;
+        document.getElementById('btnFecharSuporte').onclick = () => overlay.remove();
+        return;
+      }
+
+      if (!existente) {
+        document.getElementById('suporteBody').innerHTML = `
+          <div class="empty" style="margin-bottom:16px">Essa empresa ainda não tem acesso de suporte.</div>
+          <div class="modal-actions">
+            <button class="btn" id="btnCancelarSuporte">Cancelar</button>
+            <button class="btn btn-primary" id="btnGerarSuporte">Gerar acesso de suporte</button>
+          </div>`;
+        document.getElementById('btnCancelarSuporte').onclick = () => overlay.remove();
+        document.getElementById('btnGerarSuporte').onclick = gerar;
+      } else {
+        const criadoEm = this._formatarDataBR(existente.criado_em);
+        document.getElementById('suporteBody').innerHTML = `
+          <div class="empty" style="margin-bottom:16px">Já existe acesso de suporte pra essa empresa (login <code>${escapeHTML(existente.Login)}</code>). Criado em ${criadoEm}.</div>
+          <div class="modal-actions">
+            <button class="btn" id="btnCancelarSuporte">Fechar</button>
+            <button class="btn btn-primary" id="btnRedefinirSuporte">Redefinir senha</button>
+          </div>`;
+        document.getElementById('btnCancelarSuporte').onclick = () => overlay.remove();
+        document.getElementById('btnRedefinirSuporte').onclick = gerar;
+      }
+    };
+
+    renderEstadoInicial();
   },
 };
