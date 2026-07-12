@@ -5,7 +5,7 @@ import {
   getSegmentos, aplicarSegmentoNaEmpresa,
   getAcessoSuporte, gerarOuRedefinirAcessoSuporte,
   getContatosFaturamento, salvarContatoFaturamento, excluirContatoFaturamento,
-  getFaturas, anexarBoleto, darBaixaFatura, criarFaturaManual, editarFatura, reverterPagamentoFatura, excluirFatura,
+  getFaturas, anexarBoleto, anexarBoletoNaFatura, darBaixaFatura, criarFaturaManual, editarFatura, reverterPagamentoFatura, excluirFatura,
 } from '../services/supabaseAdminService.js';
 import { escapeHTML } from '../utils/escapeHTML.js';
 import { toast } from '../utils/toast.js';
@@ -554,7 +554,8 @@ export const EmpresasUI = {
   _abrirFormFatura({ org_id, fatura, comBoleto, onSaved }) {
     const isEdit = !!fatura;
     const overlayId = 'modalFormFatura_' + Date.now();
-    const mostrarUploadPdf = comBoleto && !isEdit;
+    const jaTemPdf = !!fatura?.arquivo_boleto_url;
+    const mostrarUploadPdf = comBoleto || isEdit; // editar sempre mostra, pra poder anexar/trocar o boleto
     const html = `
       <div id="${overlayId}" class="overlay" style="z-index:10001">
         <div class="modal" style="max-width:400px">
@@ -570,8 +571,8 @@ export const EmpresasUI = {
             </div>
             ${mostrarUploadPdf ? `
             <div>
-              <label style="display:block;font-size:12.5px;color:var(--muted);margin-bottom:6px">Boleto (PDF) *</label>
-              <input type="file" name="arquivo" accept="application/pdf" required style="width:100%" />
+              <label style="display:block;font-size:12.5px;color:var(--muted);margin-bottom:6px">Boleto (PDF)${!isEdit ? ' *' : jaTemPdf ? ' — deixe em branco pra manter o atual' : ''}</label>
+              <input type="file" name="arquivo" accept="application/pdf" ${!isEdit ? 'required' : ''} style="width:100%" />
             </div>` : ''}
             <div id="${overlayId}_error" style="color:#ef4444;font-size:13px;display:none"></div>
             <div class="modal-actions">
@@ -600,6 +601,10 @@ export const EmpresasUI = {
       try {
         if (isEdit) {
           await editarFatura({ fatura_id: fatura.fatura_id, valor, vencimento });
+          const file = formData.get('arquivo');
+          if (file && file.size) {
+            await anexarBoletoNaFatura({ fatura_id: fatura.fatura_id, org_id, file });
+          }
           toast.show('Fatura atualizada.', 'success');
         } else if (mostrarUploadPdf) {
           const file = formData.get('arquivo');
