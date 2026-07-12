@@ -6,6 +6,7 @@ import {
   getAcessoSuporte, gerarOuRedefinirAcessoSuporte,
   getContatosFaturamento, salvarContatoFaturamento, excluirContatoFaturamento,
   getFaturas, anexarBoleto, anexarBoletoNaFatura, darBaixaFatura, criarFaturaManual, editarFatura, reverterPagamentoFatura, excluirFatura,
+  getUsuariosDaEmpresa, getToastDestinatarios, salvarToastDestinatarios,
 } from '../services/supabaseAdminService.js';
 import { escapeHTML } from '../utils/escapeHTML.js';
 import { toast } from '../utils/toast.js';
@@ -64,6 +65,7 @@ export const EmpresasUI = {
             <th style="width:150px">Módulos</th>
             <th style="width:120px">Suporte</th>
             <th style="width:130px">Faturamento</th>
+            <th style="width:110px">Avisos</th>
             <th style="width:90px">Auditoria</th>
           </tr>
         </thead>
@@ -91,6 +93,7 @@ export const EmpresasUI = {
               <td><button class="link-btn btn-modulos" data-org="${o.org_id}" data-nome="${escapeHTML(o.nome_fantasia || o.nome_org)}"><i class="fa-solid fa-list-check"></i> Ver módulos</button></td>
               <td><button class="link-btn btn-suporte" data-org="${o.org_id}" data-nome="${escapeHTML(o.nome_fantasia || o.nome_org)}"><i class="fa-solid fa-user-shield"></i> Acesso</button></td>
               <td><button class="link-btn btn-faturamento" data-org="${o.org_id}" data-nome="${escapeHTML(o.nome_fantasia || o.nome_org)}"><i class="fa-solid fa-file-invoice-dollar"></i> Faturas</button></td>
+              <td><button class="link-btn btn-avisos" data-org="${o.org_id}" data-nome="${escapeHTML(o.nome_fantasia || o.nome_org)}"><i class="fa-solid fa-bell"></i> Avisos</button></td>
               <td><button class="link-btn btn-ver-auditoria" data-org="${o.org_id}">Ver logs</button></td>
             </tr>`).join('')}
         </tbody>
@@ -170,6 +173,9 @@ export const EmpresasUI = {
     });
     document.querySelectorAll('.btn-faturamento').forEach(btn => {
       btn.onclick = () => this._abrirModalFaturamento(btn.dataset.org, btn.dataset.nome);
+    });
+    document.querySelectorAll('.btn-avisos').forEach(btn => {
+      btn.onclick = () => this._abrirModalAvisos(btn.dataset.org, btn.dataset.nome);
     });
     document.querySelectorAll('.btn-ver-auditoria').forEach(btn => {
       btn.onclick = () => onIrPara('auditoria', { org_id: btn.dataset.org });
@@ -621,6 +627,81 @@ export const EmpresasUI = {
         errorDiv.textContent = err.message;
         errorDiv.style.display = 'block';
         submitBtn.disabled = false;
+      }
+    };
+  },
+
+  // Configura quem recebe o toast de cada tipo de aviso automático.
+  // TIPOS_AVISO é a lista de avisos existentes hoje — adicionar um tipo
+  // novo aqui é a única mudança de código necessária pra suportar mais
+  // avisos no futuro (a estrutura da tabela já é genérica).
+  _TIPOS_AVISO: [
+    { key: 'fatura_vencendo', label: 'Fatura vencendo (7 dias antes / atrasada)' },
+  ],
+
+  async _abrirModalAvisos(org_id, nomeEmpresa) {
+    const overlayId = 'modalAvisosEmpresa';
+    document.getElementById(overlayId)?.remove();
+    const html = `
+      <div id="${overlayId}" class="overlay">
+        <div class="modal" style="max-width:480px">
+          <h3>Avisos automáticos — ${escapeHTML(nomeEmpresa)}</h3>
+          <p class="sub">Escolha quem recebe o toast de cada tipo de aviso, ao logar.</p>
+          <div id="avisosTipoSelect" style="margin:14px 0">
+            <label style="display:block;font-size:12.5px;color:var(--muted);margin-bottom:6px">Tipo de aviso</label>
+            <select id="avisosTipo" class="select" style="width:100%">
+              ${this._TIPOS_AVISO.map(t => `<option value="${t.key}">${escapeHTML(t.label)}</option>`).join('')}
+            </select>
+          </div>
+          <div id="avisosUsuariosBody"><div class="loading"><i class="fa-solid fa-spinner fa-spin"></i> Carregando...</div></div>
+          <div class="modal-actions">
+            <button class="btn" id="btnCancelarAvisos">Cancelar</button>
+            <button class="btn btn-primary" id="btnSalvarAvisos">Salvar</button>
+          </div>
+        </div>
+      </div>`;
+    document.body.insertAdjacentHTML('beforeend', html);
+    const overlay = document.getElementById(overlayId);
+    overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.remove(); });
+    document.getElementById('btnCancelarAvisos').onclick = () => overlay.remove();
+
+    let usuarios = [];
+    try {
+      usuarios = await getUsuariosDaEmpresa(org_id);
+    } catch (e) {
+      document.getElementById('avisosUsuariosBody').innerHTML = `<p class="sub" style="color:var(--danger)">Erro ao carregar usuários: ${escapeHTML(e.message)}</p>`;
+      return;
+    }
+
+    const carregarLista = async () => {
+      const tipoSel = document.getElementById('avisosTipo').value;
+      let selecionados = [];
+      try {
+        selecionados = await getToastDestinatarios(org_id, tipoSel);
+      } catch (e) {
+        toast.show('Erro ao carregar destinatários: ' + e.message, 'error');
+      }
+      document.getElementById('avisosUsuariosBody').innerHTML = usuarios.length
+        ? usuarios.map(u => `
+            <label style="display:flex;align-items:center;gap:8px;padding:6px 0;font-size:13px;cursor:pointer">
+              <input type="checkbox" class="chk-avisos-usuario" value="${u.user_id}" ${selecionados.includes(u.user_id) ? 'checked' : ''}>
+              ${escapeHTML(u.nome)}
+            </label>`).join('')
+        : `<p class="sub">Nenhum usuário cadastrado nessa empresa.</p>`;
+    };
+
+    document.getElementById('avisosTipo').onchange = carregarLista;
+    await carregarLista();
+
+    document.getElementById('btnSalvarAvisos').onclick = async () => {
+      const tipoSel = document.getElementById('avisosTipo').value;
+      const selecionados = Array.from(document.querySelectorAll('.chk-avisos-usuario:checked')).map(c => c.value);
+      try {
+        await salvarToastDestinatarios(org_id, tipoSel, selecionados);
+        toast.show('Destinatários atualizados.', 'success');
+        overlay.remove();
+      } catch (e) {
+        toast.show('Erro ao salvar: ' + e.message, 'error');
       }
     };
   },
