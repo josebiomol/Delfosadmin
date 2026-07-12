@@ -539,6 +539,39 @@ export async function reverterPagamentoFatura(fatura_id) {
   });
 }
 
+// ========== TOAST DE LOGIN (avisos automáticos, quem recebe) ==========
+// tipo_aviso é extensível — hoje só 'fatura_vencendo'. Se adicionar um
+// tipo novo (ex: 'documento_vencendo'), não precisa mexer no schema.
+
+export async function getUsuariosDaEmpresa(org_id) {
+  const { data, error } = await supabase.from('users').select('user_id, nome').eq('org_id', org_id).eq('ativo', 'SIM').neq('oculto', 'SIM').order('nome');
+  if (error) throw new Error(error.message);
+  return data || [];
+}
+
+export async function getToastDestinatarios(org_id, tipo_aviso) {
+  const { data, error } = await supabase.from('toast_destinatarios').select('user_id').eq('org_id', org_id).eq('tipo_aviso', tipo_aviso).eq('ativo', 'SIM');
+  if (error) throw new Error(error.message);
+  return (data || []).map(d => d.user_id);
+}
+
+export async function salvarToastDestinatarios(org_id, tipo_aviso, userIds) {
+  return comRenovacaoDeSessao(async () => {
+    await supabase.from('toast_destinatarios').delete().eq('org_id', org_id).eq('tipo_aviso', tipo_aviso);
+    if (userIds.length) {
+      const rows = userIds.map(uid => ({ id: `TD${Date.now()}${uid}`, org_id, tipo_aviso, user_id: uid, ativo: 'SIM' }));
+      const { error } = await supabase.from('toast_destinatarios').insert(rows);
+      if (error) throw new Error(error.message);
+    }
+    registrarLogAdmin({
+      acao: 'editar', entidade: 'toast_destinatarios', entidade_id: org_id,
+      descricao: `Ajustou destinatários de aviso "${tipo_aviso}" (${userIds.length} usuário(s))`,
+    });
+    return { success: true };
+  });
+}
+
+
 // ========== AUDITORIA ==========
 export async function getAuditLogs({ org_id, user_ids, modulo, texto, data_inicio, data_fim, hora_inicio, hora_fim, limite = 100 } = {}) {
   let q = supabase.from('audit_logs').select('*').order('criado_em', { ascending: false }).limit(limite);
