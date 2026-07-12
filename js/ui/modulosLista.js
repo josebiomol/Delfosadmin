@@ -27,6 +27,7 @@ export const MODULOS = [
     { key: 'controle_agua', label: 'Controle de qualidade da água' },
     { key: 'gestao_temp_umidade', label: 'Controle de temperatura e umidade' },
     { key: 'faturamento', label: 'Faturamento' },
+    { key: 'tarefas', label: 'Tarefas e Comunicados' },
   ] },
   { grupo: 'Fornecedores e estratégia', itens: [
     { key: 'gestao_fornecedores_produtos', label: 'Gestão de fornecedores de produtos' },
