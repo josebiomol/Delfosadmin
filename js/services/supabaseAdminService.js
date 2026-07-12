@@ -485,6 +485,31 @@ export async function excluirFatura(fatura_id) {
   });
 }
 
+// Anexa (ou troca) o PDF de uma fatura que já existe — usado no formulário
+// de Editar, pra quando a fatura foi lançada sem boleto (ou o boleto
+// errado) e precisa só disso, sem criar uma fatura nova.
+export async function anexarBoletoNaFatura({ fatura_id, org_id, file }) {
+  return comRenovacaoDeSessao(async () => {
+    const nomeSanitizado = file.name.replace(/[^a-zA-Z0-9._-]/g, '_');
+    const path = `${org_id}/${fatura_id}_${nomeSanitizado}`;
+    const { error: upErr } = await supabase.storage.from('faturas').upload(path, file, { upsert: true });
+    if (upErr) throw new Error(upErr.message);
+    const { data: urlData } = supabase.storage.from('faturas').getPublicUrl(path);
+
+    const { error } = await supabase.from('faturas').update({
+      arquivo_boleto_url: urlData.publicUrl, arquivo_boleto_nome: file.name,
+    }).eq('fatura_id', fatura_id);
+    if (error) throw new Error(error.message);
+
+    registrarLogAdmin({
+      acao: 'editar', entidade: 'fatura', entidade_id: fatura_id,
+      descricao: `Anexou/trocou o PDF da fatura ${fatura_id}`,
+    });
+
+    return { success: true };
+  });
+}
+
 // Corrige uma fatura já lançada (valor/vencimento errados) — não mexe em
 // status nem PDF, só os dados base.
 export async function editarFatura({ fatura_id, valor, vencimento }) {
