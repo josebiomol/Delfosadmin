@@ -459,6 +459,32 @@ export async function criarFaturaManual({ org_id, valor, vencimento }) {
   });
 }
 
+// Exclui uma fatura lançada errada (ex: boleto/valor totalmente trocado,
+// não é só um ajuste — pra isso usa editarFatura). Remove também o PDF do
+// Storage, se tiver.
+export async function excluirFatura(fatura_id) {
+  return comRenovacaoDeSessao(async () => {
+    const { data: fatura } = await supabase.from('faturas').select('*').eq('fatura_id', fatura_id).maybeSingle();
+    if (!fatura) throw new Error('Fatura não encontrada.');
+
+    if (fatura.arquivo_boleto_url) {
+      const path = fatura.arquivo_boleto_url.split('/faturas/')[1];
+      if (path) await supabase.storage.from('faturas').remove([path]);
+    }
+
+    const { error } = await supabase.from('faturas').delete().eq('fatura_id', fatura_id);
+    if (error) throw new Error(error.message);
+
+    const { data: org } = await supabase.from('organizations').select('nome_fantasia, nome_org').eq('org_id', fatura.org_id).maybeSingle();
+    registrarLogAdmin({
+      acao: 'excluir', entidade: 'fatura', entidade_id: fatura_id,
+      descricao: `Excluiu a fatura ${fatura_id} (venc. ${fatura.vencimento}) de "${org?.nome_fantasia || org?.nome_org || fatura.org_id}"`,
+    });
+
+    return { success: true };
+  });
+}
+
 // Corrige uma fatura já lançada (valor/vencimento errados) — não mexe em
 // status nem PDF, só os dados base.
 export async function editarFatura({ fatura_id, valor, vencimento }) {
