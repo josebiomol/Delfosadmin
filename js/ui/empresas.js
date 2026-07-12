@@ -4,6 +4,8 @@ import {
   getPlanos, aplicarPlanoNaEmpresa,
   getSegmentos, aplicarSegmentoNaEmpresa,
   getAcessoSuporte, gerarOuRedefinirAcessoSuporte,
+  getContatosFaturamento, salvarContatoFaturamento, excluirContatoFaturamento,
+  getFaturas, anexarBoleto, darBaixaFatura, criarFaturaManual,
 } from '../services/supabaseAdminService.js';
 import { escapeHTML } from '../utils/escapeHTML.js';
 import { toast } from '../utils/toast.js';
@@ -61,6 +63,7 @@ export const EmpresasUI = {
             <th style="width:110px">Ativo</th>
             <th style="width:150px">Módulos</th>
             <th style="width:120px">Suporte</th>
+            <th style="width:130px">Faturamento</th>
             <th style="width:90px">Auditoria</th>
           </tr>
         </thead>
@@ -87,6 +90,7 @@ export const EmpresasUI = {
               <td><label class="switch"><input type="checkbox" class="chk-status" data-org="${o.org_id}" ${o.status !== 'suspenso' ? 'checked' : ''}><span class="slider"></span></label></td>
               <td><button class="link-btn btn-modulos" data-org="${o.org_id}" data-nome="${escapeHTML(o.nome_fantasia || o.nome_org)}"><i class="fa-solid fa-list-check"></i> Ver módulos</button></td>
               <td><button class="link-btn btn-suporte" data-org="${o.org_id}" data-nome="${escapeHTML(o.nome_fantasia || o.nome_org)}"><i class="fa-solid fa-user-shield"></i> Acesso</button></td>
+              <td><button class="link-btn btn-faturamento" data-org="${o.org_id}" data-nome="${escapeHTML(o.nome_fantasia || o.nome_org)}"><i class="fa-solid fa-file-invoice-dollar"></i> Faturas</button></td>
               <td><button class="link-btn btn-ver-auditoria" data-org="${o.org_id}">Ver logs</button></td>
             </tr>`).join('')}
         </tbody>
@@ -163,6 +167,9 @@ export const EmpresasUI = {
     });
     document.querySelectorAll('.btn-suporte').forEach(btn => {
       btn.onclick = () => this._abrirModalSuporte(btn.dataset.org, btn.dataset.nome);
+    });
+    document.querySelectorAll('.btn-faturamento').forEach(btn => {
+      btn.onclick = () => this._abrirModalFaturamento(btn.dataset.org, btn.dataset.nome);
     });
     document.querySelectorAll('.btn-ver-auditoria').forEach(btn => {
       btn.onclick = () => onIrPara('auditoria', { org_id: btn.dataset.org });
@@ -331,5 +338,150 @@ export const EmpresasUI = {
     };
 
     renderEstadoInicial();
+  },
+
+  _formatarMoeda(v) {
+    return (Number(v) || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+  },
+
+  _badgeStatusFatura(f) {
+    const hoje = new Date().toISOString().slice(0, 10);
+    if (f.status === 'paga') return `<span class="badge b-green">Paga</span>`;
+    if (f.vencimento < hoje) return `<span class="badge b-red">Atrasada</span>`;
+    return `<span class="badge b-yellow">Pendente</span>`;
+  },
+
+  // Modal de Faturamento — contatos (quem recebe/paga, nem sempre é o email
+  // da empresa) + histórico de faturas (anexar boleto, dar baixa, ver PDF,
+  // e criar a próxima manualmente se a automação de "dar baixa" falhar).
+  async _abrirModalFaturamento(org_id, nomeEmpresa) {
+    const overlayId = 'modalFaturamentoEmpresa';
+    document.getElementById(overlayId)?.remove();
+    const html = `
+      <div id="${overlayId}" class="overlay">
+        <div class="modal" style="max-width:640px">
+          <h3>Faturamento — ${escapeHTML(nomeEmpresa)}</h3>
+          <p class="sub">Contatos de cobrança e histórico de faturas. Sem disparo automático de e-mail por enquanto — o boleto fica disponível pro cliente baixar no app dele.</p>
+
+          <div style="margin:16px 0">
+            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
+              <strong style="font-size:12.5px;color:var(--muted)">CONTATOS DE FATURAMENTO</strong>
+              <button class="link-btn" id="btnNovoContatoFat">+ Adicionar contato</button>
+            </div>
+            <div id="contatosFatBody"><div class="loading"><i class="fa-solid fa-spinner fa-spin"></i> Carregando...</div></div>
+          </div>
+
+          <div style="margin:16px 0">
+            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
+              <strong style="font-size:12.5px;color:var(--muted)">HISTÓRICO DE FATURAS</strong>
+              <div style="display:flex;gap:8px">
+                <button class="link-btn" id="btnNovaFaturaManual">+ Nova fatura</button>
+                <button class="link-btn" id="btnAnexarBoleto">+ Anexar boleto</button>
+              </div>
+            </div>
+            <div id="faturasBody"><div class="loading"><i class="fa-solid fa-spinner fa-spin"></i> Carregando...</div></div>
+          </div>
+
+          <div class="modal-actions"><button class="btn" id="btnFecharFaturamento">Fechar</button></div>
+        </div>
+      </div>`;
+    document.body.insertAdjacentHTML('beforeend', html);
+    const overlay = document.getElementById(overlayId);
+    overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.remove(); });
+    document.getElementById('btnFecharFaturamento').onclick = () => overlay.remove();
+
+    const carregarContatos = async () => {
+      const contatos = await getContatosFaturamento(org_id);
+      document.getElementById('contatosFatBody').innerHTML = contatos.length
+        ? contatos.map(c => `
+            <div style="display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid var(--line);font-size:13px">
+              <span>${escapeHTML(c.nome)} · <span style="color:var(--muted)">${escapeHTML(c.email)}${c.telefone ? ' · ' + escapeHTML(c.telefone) : ''}</span></span>
+              <button class="link-btn btn-remover-contato-fat" data-id="${c.contato_id}" style="color:var(--danger,#ef4444)">Remover</button>
+            </div>`).join('')
+        : `<div class="empty" style="padding:10px 0">Nenhum contato cadastrado.</div>`;
+
+      document.querySelectorAll('.btn-remover-contato-fat').forEach(btn => {
+        btn.onclick = async () => {
+          if (!confirm('Remover esse contato de faturamento?')) return;
+          try {
+            await excluirContatoFaturamento(btn.dataset.id);
+            carregarContatos();
+          } catch (e) { toast.show('Erro: ' + e.message, 'error'); }
+        };
+      });
+    };
+
+    const carregarFaturas = async () => {
+      const faturas = await getFaturas(org_id);
+      document.getElementById('faturasBody').innerHTML = faturas.length
+        ? `<div class="table-wrap"><table>
+            <thead><tr><th>Venc.</th><th>Valor</th><th>Status</th><th>Ações</th></tr></thead>
+            <tbody>${faturas.map(f => `
+              <tr>
+                <td>${this._formatarDataBR(f.vencimento)}</td>
+                <td>${this._formatarMoeda(f.valor)}</td>
+                <td>${this._badgeStatusFatura(f)}</td>
+                <td style="display:flex;gap:8px;flex-wrap:wrap">
+                  ${f.arquivo_boleto_url ? `<a class="link-btn" href="${f.arquivo_boleto_url}" target="_blank">Ver PDF</a>` : '<span style="color:var(--muted);font-size:11.5px">sem PDF</span>'}
+                  ${f.status !== 'paga' ? `<button class="link-btn btn-dar-baixa-fat" data-id="${f.fatura_id}">Dar baixa</button>` : ''}
+                </td>
+              </tr>`).join('')}
+            </tbody>
+          </table></div>`
+        : `<div class="empty" style="padding:10px 0">Nenhuma fatura cadastrada ainda.</div>`;
+
+      document.querySelectorAll('.btn-dar-baixa-fat').forEach(btn => {
+        btn.onclick = async () => {
+          if (!confirm('Confirmar baixa dessa fatura? Isso já gera a próxima automaticamente.')) return;
+          try {
+            const r = await darBaixaFatura(btn.dataset.id);
+            toast.show(r.proximaJaExistia ? 'Baixa registrada.' : `Baixa registrada — próxima fatura gerada (venc. ${this._formatarDataBR(r.proximoVencimento)}).`, 'success');
+            carregarFaturas();
+          } catch (e) { toast.show('Erro: ' + e.message, 'error'); }
+        };
+      });
+    };
+
+    carregarContatos();
+    carregarFaturas();
+
+    document.getElementById('btnNovoContatoFat').onclick = () => {
+      const nome = prompt('Nome do contato:');
+      if (!nome) return;
+      const email = prompt('Email:');
+      if (!email) return;
+      const telefone = prompt('Telefone (opcional):') || '';
+      salvarContatoFaturamento({ org_id, nome, email, telefone })
+        .then(() => carregarContatos())
+        .catch(e => toast.show('Erro: ' + e.message, 'error'));
+    };
+
+    document.getElementById('btnNovaFaturaManual').onclick = () => {
+      const valor = parseFloat(prompt('Valor da fatura (ex: 690.00):'));
+      if (!valor) return;
+      const vencimento = prompt('Vencimento (AAAA-MM-DD):');
+      if (!vencimento) return;
+      criarFaturaManual({ org_id, valor, vencimento })
+        .then(() => { toast.show('Fatura criada.', 'success'); carregarFaturas(); })
+        .catch(e => toast.show('Erro: ' + e.message, 'error'));
+    };
+
+    document.getElementById('btnAnexarBoleto').onclick = () => {
+      const input = document.createElement('input');
+      input.type = 'file';
+      input.accept = 'application/pdf';
+      input.onchange = () => {
+        const file = input.files[0];
+        if (!file) return;
+        const valor = parseFloat(prompt('Valor da fatura (ex: 690.00):'));
+        if (!valor) return;
+        const vencimento = prompt('Vencimento (AAAA-MM-DD):');
+        if (!vencimento) return;
+        anexarBoleto({ org_id, file, valor, vencimento })
+          .then(() => { toast.show('Boleto anexado.', 'success'); carregarFaturas(); })
+          .catch(e => toast.show('Erro: ' + e.message, 'error'));
+      };
+      input.click();
+    };
   },
 };
