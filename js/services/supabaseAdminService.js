@@ -226,7 +226,7 @@ const PERMISSAO_FLAGS_KEYS = [
 ];
 const MODULOS_GENERICOS_KEYS = [
   'gestao_estrategica', // já implementado, mas fora de agendamento/configuracoes — usa ação genérica
-  'faturamento',
+  'faturamento', 'tarefas',
   'gestao_processos', 'gestao_riscos', 'gestao_ocorrencias', 'gestao_planos_acoes',
   'gestao_indicadores', 'gestao_auditorias', 'gestao_treinamentos', 'gestao_acidentes',
   'recursos_humanos', 'gestao_atendimento_cliente', 'gestao_reunioes', 'gestao_ordem_servico',
