@@ -5,7 +5,7 @@ import {
   getSegmentos, aplicarSegmentoNaEmpresa,
   getAcessoSuporte, gerarOuRedefinirAcessoSuporte,
   getContatosFaturamento, salvarContatoFaturamento, excluirContatoFaturamento,
-  getFaturas, anexarBoleto, darBaixaFatura, criarFaturaManual,
+  getFaturas, anexarBoleto, darBaixaFatura, criarFaturaManual, editarFatura, reverterPagamentoFatura,
 } from '../services/supabaseAdminService.js';
 import { escapeHTML } from '../utils/escapeHTML.js';
 import { toast } from '../utils/toast.js';
@@ -396,10 +396,19 @@ export const EmpresasUI = {
         ? contatos.map(c => `
             <div style="display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid var(--line);font-size:13px">
               <span>${escapeHTML(c.nome)} · <span style="color:var(--muted)">${escapeHTML(c.email)}${c.telefone ? ' · ' + escapeHTML(c.telefone) : ''}</span></span>
-              <button class="link-btn btn-remover-contato-fat" data-id="${c.contato_id}" style="color:var(--danger,#ef4444)">Remover</button>
+              <span style="display:flex;gap:10px">
+                <button class="link-btn btn-editar-contato-fat" data-id="${c.contato_id}">Editar</button>
+                <button class="link-btn btn-remover-contato-fat" data-id="${c.contato_id}" style="color:var(--danger,#ef4444)">Remover</button>
+              </span>
             </div>`).join('')
         : `<div class="empty" style="padding:10px 0">Nenhum contato cadastrado.</div>`;
 
+      document.querySelectorAll('.btn-editar-contato-fat').forEach(btn => {
+        btn.onclick = () => {
+          const contato = contatos.find(c => c.contato_id === btn.dataset.id);
+          this._abrirFormContato({ org_id, contato, onSaved: carregarContatos });
+        };
+      });
       document.querySelectorAll('.btn-remover-contato-fat').forEach(btn => {
         btn.onclick = async () => {
           if (!confirm('Remover esse contato de faturamento?')) return;
@@ -423,12 +432,22 @@ export const EmpresasUI = {
                 <td>${this._badgeStatusFatura(f)}</td>
                 <td style="display:flex;gap:8px;flex-wrap:wrap">
                   ${f.arquivo_boleto_url ? `<a class="link-btn" href="${f.arquivo_boleto_url}" target="_blank">Ver PDF</a>` : '<span style="color:var(--muted);font-size:11.5px">sem PDF</span>'}
-                  ${f.status !== 'paga' ? `<button class="link-btn btn-dar-baixa-fat" data-id="${f.fatura_id}">Dar baixa</button>` : ''}
+                  <button class="link-btn btn-editar-fatura" data-id="${f.fatura_id}">Editar</button>
+                  ${f.status !== 'paga'
+                    ? `<button class="link-btn btn-dar-baixa-fat" data-id="${f.fatura_id}">Dar baixa</button>`
+                    : `<button class="link-btn btn-reverter-fat" data-id="${f.fatura_id}" style="color:var(--danger,#ef4444)">Reverter pagamento</button>`}
                 </td>
               </tr>`).join('')}
             </tbody>
           </table></div>`
         : `<div class="empty" style="padding:10px 0">Nenhuma fatura cadastrada ainda.</div>`;
+
+      document.querySelectorAll('.btn-editar-fatura').forEach(btn => {
+        btn.onclick = () => {
+          const fatura = faturas.find(f => f.fatura_id === btn.dataset.id);
+          this._abrirFormFatura({ org_id, fatura, onSaved: carregarFaturas });
+        };
+      });
 
       document.querySelectorAll('.btn-dar-baixa-fat').forEach(btn => {
         btn.onclick = async () => {
@@ -440,48 +459,152 @@ export const EmpresasUI = {
           } catch (e) { toast.show('Erro: ' + e.message, 'error'); }
         };
       });
+
+      document.querySelectorAll('.btn-reverter-fat').forEach(btn => {
+        btn.onclick = async () => {
+          if (!confirm('Reverter essa baixa? A fatura volta pra "Pendente".')) return;
+          try {
+            await reverterPagamentoFatura(btn.dataset.id);
+            toast.show('Baixa revertida — fatura voltou pra pendente.', 'success');
+            carregarFaturas();
+          } catch (e) { toast.show('Erro: ' + e.message, 'error'); }
+        };
+      });
     };
 
     carregarContatos();
     carregarFaturas();
 
     document.getElementById('btnNovoContatoFat').onclick = () => {
-      const nome = prompt('Nome do contato:');
-      if (!nome) return;
-      const email = prompt('Email:');
-      if (!email) return;
-      const telefone = prompt('Telefone (opcional):') || '';
-      salvarContatoFaturamento({ org_id, nome, email, telefone })
-        .then(() => carregarContatos())
-        .catch(e => toast.show('Erro: ' + e.message, 'error'));
+      this._abrirFormContato({ org_id, contato: null, onSaved: carregarContatos });
     };
-
     document.getElementById('btnNovaFaturaManual').onclick = () => {
-      const valor = parseFloat(prompt('Valor da fatura (ex: 690.00):'));
-      if (!valor) return;
-      const vencimento = prompt('Vencimento (AAAA-MM-DD):');
-      if (!vencimento) return;
-      criarFaturaManual({ org_id, valor, vencimento })
-        .then(() => { toast.show('Fatura criada.', 'success'); carregarFaturas(); })
-        .catch(e => toast.show('Erro: ' + e.message, 'error'));
+      this._abrirFormFatura({ org_id, fatura: null, comBoleto: false, onSaved: carregarFaturas });
     };
-
     document.getElementById('btnAnexarBoleto').onclick = () => {
-      const input = document.createElement('input');
-      input.type = 'file';
-      input.accept = 'application/pdf';
-      input.onchange = () => {
-        const file = input.files[0];
-        if (!file) return;
-        const valor = parseFloat(prompt('Valor da fatura (ex: 690.00):'));
-        if (!valor) return;
-        const vencimento = prompt('Vencimento (AAAA-MM-DD):');
-        if (!vencimento) return;
-        anexarBoleto({ org_id, file, valor, vencimento })
-          .then(() => { toast.show('Boleto anexado.', 'success'); carregarFaturas(); })
-          .catch(e => toast.show('Erro: ' + e.message, 'error'));
-      };
-      input.click();
+      this._abrirFormFatura({ org_id, fatura: null, comBoleto: true, onSaved: carregarFaturas });
+    };
+  },
+
+  // Formulário de cadastro/edição de contato de faturamento (substitui os
+  // prompt() do navegador por um form de verdade, mesmo visual dos outros
+  // modais do painel).
+  _abrirFormContato({ org_id, contato, onSaved }) {
+    const isEdit = !!contato;
+    const overlayId = 'modalFormContatoFat_' + Date.now();
+    const html = `
+      <div id="${overlayId}" class="overlay" style="z-index:10001">
+        <div class="modal" style="max-width:400px">
+          <h3>${isEdit ? 'Editar' : 'Adicionar'} contato de faturamento</h3>
+          <form id="${overlayId}_form" style="display:grid;gap:14px;margin-top:16px">
+            <div>
+              <label style="display:block;font-size:12.5px;color:var(--muted);margin-bottom:6px">Nome *</label>
+              <input type="text" name="nome" class="input" value="${escapeHTML(contato?.nome || '')}" required style="width:100%" />
+            </div>
+            <div>
+              <label style="display:block;font-size:12.5px;color:var(--muted);margin-bottom:6px">Email *</label>
+              <input type="email" name="email" class="input" value="${escapeHTML(contato?.email || '')}" required style="width:100%" />
+            </div>
+            <div>
+              <label style="display:block;font-size:12.5px;color:var(--muted);margin-bottom:6px">Telefone</label>
+              <input type="tel" name="telefone" class="input" value="${escapeHTML(contato?.telefone || '')}" style="width:100%" />
+            </div>
+            <div class="modal-actions">
+              <button type="button" class="btn" id="${overlayId}_cancel">Cancelar</button>
+              <button type="submit" class="btn btn-primary">Salvar</button>
+            </div>
+          </form>
+        </div>
+      </div>`;
+    document.body.insertAdjacentHTML('beforeend', html);
+    const overlay = document.getElementById(overlayId);
+    const close = () => overlay.remove();
+    overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
+    document.getElementById(`${overlayId}_cancel`).onclick = close;
+
+    document.getElementById(`${overlayId}_form`).onsubmit = async (e) => {
+      e.preventDefault();
+      const formData = Object.fromEntries(new FormData(e.target));
+      try {
+        await salvarContatoFaturamento({ org_id, contato_id: contato?.contato_id, ...formData });
+        toast.show(isEdit ? 'Contato atualizado.' : 'Contato adicionado.', 'success');
+        close();
+        onSaved();
+      } catch (err) {
+        toast.show('Erro ao salvar: ' + err.message, 'error');
+      }
+    };
+  },
+
+  // Formulário de nova/editar fatura (com ou sem anexo de boleto) —
+  // substitui os prompt() e já usa <input type="date"> (mostra dd/mm/aaaa
+  // no navegador automaticamente, guarda ISO por baixo).
+  _abrirFormFatura({ org_id, fatura, comBoleto, onSaved }) {
+    const isEdit = !!fatura;
+    const overlayId = 'modalFormFatura_' + Date.now();
+    const mostrarUploadPdf = comBoleto && !isEdit;
+    const html = `
+      <div id="${overlayId}" class="overlay" style="z-index:10001">
+        <div class="modal" style="max-width:400px">
+          <h3>${isEdit ? 'Editar fatura' : (comBoleto ? 'Anexar boleto' : 'Nova fatura')}</h3>
+          <form id="${overlayId}_form" style="display:grid;gap:14px;margin-top:16px">
+            <div>
+              <label style="display:block;font-size:12.5px;color:var(--muted);margin-bottom:6px">Valor (R$) *</label>
+              <input type="number" name="valor" step="0.01" min="0.01" class="input" value="${fatura?.valor ?? ''}" required style="width:100%" />
+            </div>
+            <div>
+              <label style="display:block;font-size:12.5px;color:var(--muted);margin-bottom:6px">Vencimento *</label>
+              <input type="date" name="vencimento" class="input" value="${fatura?.vencimento || ''}" required style="width:100%" />
+            </div>
+            ${mostrarUploadPdf ? `
+            <div>
+              <label style="display:block;font-size:12.5px;color:var(--muted);margin-bottom:6px">Boleto (PDF) *</label>
+              <input type="file" name="arquivo" accept="application/pdf" required style="width:100%" />
+            </div>` : ''}
+            <div id="${overlayId}_error" style="color:#ef4444;font-size:13px;display:none"></div>
+            <div class="modal-actions">
+              <button type="button" class="btn" id="${overlayId}_cancel">Cancelar</button>
+              <button type="submit" class="btn btn-primary">Salvar</button>
+            </div>
+          </form>
+        </div>
+      </div>`;
+    document.body.insertAdjacentHTML('beforeend', html);
+    const overlay = document.getElementById(overlayId);
+    const close = () => overlay.remove();
+    overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
+    document.getElementById(`${overlayId}_cancel`).onclick = close;
+    const errorDiv = document.getElementById(`${overlayId}_error`);
+
+    document.getElementById(`${overlayId}_form`).onsubmit = async (e) => {
+      e.preventDefault();
+      errorDiv.style.display = 'none';
+      const formData = new FormData(e.target);
+      const valor = parseFloat(formData.get('valor'));
+      const vencimento = formData.get('vencimento');
+      const submitBtn = e.target.querySelector('button[type="submit"]');
+      submitBtn.disabled = true;
+
+      try {
+        if (isEdit) {
+          await editarFatura({ fatura_id: fatura.fatura_id, valor, vencimento });
+          toast.show('Fatura atualizada.', 'success');
+        } else if (mostrarUploadPdf) {
+          const file = formData.get('arquivo');
+          if (!file || !file.size) throw new Error('Selecione o PDF do boleto.');
+          await anexarBoleto({ org_id, file, valor, vencimento });
+          toast.show('Boleto anexado.', 'success');
+        } else {
+          await criarFaturaManual({ org_id, valor, vencimento });
+          toast.show('Fatura criada.', 'success');
+        }
+        close();
+        onSaved();
+      } catch (err) {
+        errorDiv.textContent = err.message;
+        errorDiv.style.display = 'block';
+        submitBtn.disabled = false;
+      }
     };
   },
 };
