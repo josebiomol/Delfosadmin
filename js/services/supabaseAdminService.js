@@ -226,6 +226,7 @@ const PERMISSAO_FLAGS_KEYS = [
 ];
 const MODULOS_GENERICOS_KEYS = [
   'gestao_estrategica', // já implementado, mas fora de agendamento/configuracoes — usa ação genérica
+  'faturamento',
   'gestao_processos', 'gestao_riscos', 'gestao_ocorrencias', 'gestao_planos_acoes',
   'gestao_indicadores', 'gestao_auditorias', 'gestao_treinamentos', 'gestao_acidentes',
   'recursos_humanos', 'gestao_atendimento_cliente', 'gestao_reunioes', 'gestao_ordem_servico',
@@ -327,7 +328,138 @@ export async function gerarOuRedefinirAcessoSuporte(org_id) {
   });
 }
 
-// ========== AUDITORIA ==========
+// ========== FATURAMENTO ==========
+// Fatura manual por enquanto: admin sobe o PDF do boleto já pronto (gerado
+// em outro lugar — banco, contador), define vencimento, e o cliente baixa
+// no app dele. Sem disparo automático de e-mail ainda (ver STATUS_ATUAL.md
+// item 7 — fica pra quando o volume de empresas justificar a integração
+// com um provedor de e-mail transacional).
+
+// Empurra a data pro próximo dia útil se cair em fim de semana ou feriado
+// nacional (tabela feriados_nacionais — cadastrável, ver migration).
+export async function ajustarParaDiaUtil(dataISO) {
+  let d = new Date(dataISO + 'T12:00:00'); // meio-dia evita problema de fuso na comparação de dia
+  const { data: feriados } = await supabase.from('feriados_nacionais').select('data');
+  const feriadosSet = new Set((feriados || []).map(f => f.data));
+  const toISO = (date) => date.toISOString().slice(0, 10);
+
+  while (d.getDay() === 0 || d.getDay() === 6 || feriadosSet.has(toISO(d))) {
+    d.setDate(d.getDate() + 1);
+  }
+  return toISO(d);
+}
+
+// ---------- Contatos de faturamento ----------
+export async function getContatosFaturamento(org_id) {
+  const { data, error } = await supabase.from('contatos_faturamento').select('*').eq('org_id', org_id).eq('ativo', 'SIM').order('criado_em');
+  if (error) throw new Error(error.message);
+  return data || [];
+}
+
+export async function salvarContatoFaturamento(payload) {
+  return comRenovacaoDeSessao(async () => {
+    const { contato_id, ...formData } = payload;
+    const row = { ...formData };
+    row.contato_id = contato_id || `CFAT${Date.now()}`;
+    if (!row.ativo) row.ativo = 'SIM';
+    const { error } = await supabase.from('contatos_faturamento').upsert(row, { onConflict: 'contato_id' });
+    if (error) throw new Error(error.message);
+    return { success: true };
+  });
+}
+
+export async function excluirContatoFaturamento(contato_id) {
+  return comRenovacaoDeSessao(async () => {
+    const { error } = await supabase.from('contatos_faturamento').update({ ativo: 'NAO' }).eq('contato_id', contato_id);
+    if (error) throw new Error(error.message);
+    return { success: true };
+  });
+}
+
+// ---------- Faturas ----------
+export async function getFaturas(org_id) {
+  const { data, error } = await supabase.from('faturas').select('*').eq('org_id', org_id).order('vencimento', { ascending: false });
+  if (error) throw new Error(error.message);
+  return data || [];
+}
+
+// Sobe o PDF do boleto pro Storage e cria a fatura (status 'pendente').
+export async function anexarBoleto({ org_id, file, valor, vencimento }) {
+  return comRenovacaoDeSessao(async () => {
+    const fatura_id = `FAT${Date.now()}`;
+    const nomeSanitizado = file.name.replace(/[^a-zA-Z0-9._-]/g, '_');
+    const path = `${org_id}/${fatura_id}_${nomeSanitizado}`;
+    const { error: upErr } = await supabase.storage.from('faturas').upload(path, file, { upsert: false });
+    if (upErr) throw new Error(upErr.message);
+    const { data: urlData } = supabase.storage.from('faturas').getPublicUrl(path);
+
+    const { data: org } = await supabase.from('organizations').select('nome_fantasia, nome_org').eq('org_id', org_id).maybeSingle();
+    const { error } = await supabase.from('faturas').insert({
+      fatura_id, org_id, valor, vencimento, status: 'pendente',
+      arquivo_boleto_url: urlData.publicUrl, arquivo_boleto_nome: file.name,
+      criado_por: getAdminSession()?.admin_id || null,
+    });
+    if (error) throw new Error(error.message);
+
+    registrarLogAdmin({
+      acao: 'criar', entidade: 'fatura', entidade_id: fatura_id,
+      descricao: `Anexou boleto (venc. ${vencimento}, R$ ${valor}) pra "${org?.nome_fantasia || org?.nome_org || org_id}"`,
+    });
+
+    return { success: true };
+  });
+}
+
+// Marca como paga e já gera a próxima fatura automaticamente (mesmo valor,
+// vencimento = +1 mês, ajustado pra dia útil). Se por algum motivo já
+// existir uma fatura pendente futura pra essa empresa (ex: essa função
+// rodou 2x, ou o admin já criou manualmente), não duplica.
+export async function darBaixaFatura(fatura_id) {
+  return comRenovacaoDeSessao(async () => {
+    const { data: fatura, error: fErr } = await supabase.from('faturas').select('*').eq('fatura_id', fatura_id).maybeSingle();
+    if (fErr) throw new Error(fErr.message);
+    if (!fatura) throw new Error('Fatura não encontrada.');
+
+    const { error } = await supabase.from('faturas').update({ status: 'paga', pago_em: new Date().toISOString() }).eq('fatura_id', fatura_id);
+    if (error) throw new Error(error.message);
+
+    const { data: org } = await supabase.from('organizations').select('nome_fantasia, nome_org').eq('org_id', fatura.org_id).maybeSingle();
+    registrarLogAdmin({
+      acao: 'editar', entidade: 'fatura', entidade_id: fatura_id,
+      descricao: `Deu baixa na fatura de "${org?.nome_fantasia || org?.nome_org || fatura.org_id}" (venc. ${fatura.vencimento})`,
+    });
+
+    // Já existe fatura pendente com vencimento futuro? Não duplica.
+    const { data: pendentesFuturas } = await supabase
+      .from('faturas').select('fatura_id').eq('org_id', fatura.org_id).eq('status', 'pendente').gt('vencimento', fatura.vencimento);
+    if (pendentesFuturas?.length) return { success: true, proximaJaExistia: true };
+
+    const proximoVencimentoBruto = new Date(fatura.vencimento + 'T12:00:00');
+    proximoVencimentoBruto.setMonth(proximoVencimentoBruto.getMonth() + 1);
+    const proximoVencimento = await ajustarParaDiaUtil(proximoVencimentoBruto.toISOString().slice(0, 10));
+
+    const proximaFaturaId = `FAT${Date.now()}`;
+    const { error: proxErr } = await supabase.from('faturas').insert({
+      fatura_id: proximaFaturaId, org_id: fatura.org_id, valor: fatura.valor, vencimento: proximoVencimento, status: 'pendente',
+    });
+    if (proxErr) throw new Error('Baixa registrada, mas falhou ao gerar a próxima fatura automaticamente: ' + proxErr.message + ' — use "Nova fatura" pra cadastrar na mão.');
+
+    return { success: true, proximoVencimento };
+  });
+}
+
+// Fallback manual — sempre disponível, pro caso da geração automática (no
+// dar baixa) falhar por conexão ou qualquer outro motivo.
+export async function criarFaturaManual({ org_id, valor, vencimento }) {
+  return comRenovacaoDeSessao(async () => {
+    const fatura_id = `FAT${Date.now()}`;
+    const { error } = await supabase.from('faturas').insert({ fatura_id, org_id, valor, vencimento, status: 'pendente' });
+    if (error) throw new Error(error.message);
+    return { success: true };
+  });
+}
+
+
 export async function getAuditLogs({ org_id, user_ids, modulo, texto, data_inicio, data_fim, hora_inicio, hora_fim, limite = 100 } = {}) {
   let q = supabase.from('audit_logs').select('*').order('criado_em', { ascending: false }).limit(limite);
   if (org_id) q = q.eq('org_id', org_id);
