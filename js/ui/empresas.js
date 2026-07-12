@@ -5,7 +5,7 @@ import {
   getSegmentos, aplicarSegmentoNaEmpresa,
   getAcessoSuporte, gerarOuRedefinirAcessoSuporte,
   getContatosFaturamento, salvarContatoFaturamento, excluirContatoFaturamento,
-  getFaturas, anexarBoleto, darBaixaFatura, criarFaturaManual, editarFatura, reverterPagamentoFatura,
+  getFaturas, anexarBoleto, darBaixaFatura, criarFaturaManual, editarFatura, reverterPagamentoFatura, excluirFatura,
 } from '../services/supabaseAdminService.js';
 import { escapeHTML } from '../utils/escapeHTML.js';
 import { toast } from '../utils/toast.js';
@@ -436,6 +436,7 @@ export const EmpresasUI = {
                   ${f.status !== 'paga'
                     ? `<button class="link-btn btn-dar-baixa-fat" data-id="${f.fatura_id}">Dar baixa</button>`
                     : `<button class="link-btn btn-reverter-fat" data-id="${f.fatura_id}" style="color:var(--danger,#ef4444)">Reverter pagamento</button>`}
+                  <button class="link-btn btn-excluir-fatura" data-id="${f.fatura_id}" style="color:var(--danger,#ef4444)">Excluir</button>
                 </td>
               </tr>`).join('')}
             </tbody>
@@ -466,6 +467,17 @@ export const EmpresasUI = {
           try {
             await reverterPagamentoFatura(btn.dataset.id);
             toast.show('Baixa revertida — fatura voltou pra pendente.', 'success');
+            carregarFaturas();
+          } catch (e) { toast.show('Erro: ' + e.message, 'error'); }
+        };
+      });
+
+      document.querySelectorAll('.btn-excluir-fatura').forEach(btn => {
+        btn.onclick = async () => {
+          if (!confirm('Excluir essa fatura definitivamente? Não dá pra desfazer.')) return;
+          try {
+            await excluirFatura(btn.dataset.id);
+            toast.show('Fatura excluída.', 'success');
             carregarFaturas();
           } catch (e) { toast.show('Erro: ' + e.message, 'error'); }
         };
