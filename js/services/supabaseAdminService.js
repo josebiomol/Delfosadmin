@@ -459,7 +459,36 @@ export async function criarFaturaManual({ org_id, valor, vencimento }) {
   });
 }
 
+// Corrige uma fatura já lançada (valor/vencimento errados) — não mexe em
+// status nem PDF, só os dados base.
+export async function editarFatura({ fatura_id, valor, vencimento }) {
+  return comRenovacaoDeSessao(async () => {
+    const { error } = await supabase.from('faturas').update({ valor, vencimento }).eq('fatura_id', fatura_id);
+    if (error) throw new Error(error.message);
+    registrarLogAdmin({
+      acao: 'editar', entidade: 'fatura', entidade_id: fatura_id,
+      descricao: `Editou a fatura ${fatura_id} (novo valor R$ ${valor}, novo vencimento ${vencimento})`,
+    });
+    return { success: true };
+  });
+}
 
+// Desfaz uma baixa dada por engano — volta pra 'pendente' e limpa pago_em.
+// Não mexe na fatura seguinte que porventura já tenha sido gerada (fica
+// a critério do admin excluir/ajustar ela manualmente se for o caso).
+export async function reverterPagamentoFatura(fatura_id) {
+  return comRenovacaoDeSessao(async () => {
+    const { error } = await supabase.from('faturas').update({ status: 'pendente', pago_em: null }).eq('fatura_id', fatura_id);
+    if (error) throw new Error(error.message);
+    registrarLogAdmin({
+      acao: 'editar', entidade: 'fatura', entidade_id: fatura_id,
+      descricao: `Reverteu a baixa da fatura ${fatura_id} (voltou pra pendente)`,
+    });
+    return { success: true };
+  });
+}
+
+// ========== AUDITORIA ==========
 export async function getAuditLogs({ org_id, user_ids, modulo, texto, data_inicio, data_fim, hora_inicio, hora_fim, limite = 100 } = {}) {
   let q = supabase.from('audit_logs').select('*').order('criado_em', { ascending: false }).limit(limite);
   if (org_id) q = q.eq('org_id', org_id);
