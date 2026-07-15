@@ -3,6 +3,7 @@
 export const MODULOS = [
   { grupo: 'Gestão Estratégica', itens: [
     { key: 'gestao_estrategica', label: 'Gestão Estratégica (BSC/Backlog/Sprints)' },
+    { key: 'analise_swot', label: 'Análise SWOT' },
   ] },
   { grupo: 'Qualidade', itens: [
     { key: 'gestao_documentos', label: 'Gestão de documentos' },
