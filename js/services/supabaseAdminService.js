@@ -232,6 +232,7 @@ const MODULOS_GENERICOS_KEYS = [
   'recursos_humanos', 'gestao_atendimento_cliente', 'gestao_reunioes', 'gestao_ordem_servico',
   'gestao_patrimonio', 'controle_agua', 'gestao_temp_umidade', 'gestao_fornecedores_produtos',
   'gestao_fornecedores_servicos', 'modelo_canvas', 'cadeia_valor', 'gestao_mudanca_inovacao',
+  'analise_swot',
 ];
 
 function _gerarSenhaAleatoria(tamanho = 14) {
