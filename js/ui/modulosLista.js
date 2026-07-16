@@ -13,6 +13,7 @@ export const MODULOS = [
     { key: 'gestao_planos_acoes', label: 'Gestão de planos de ações' },
     { key: 'gestao_indicadores', label: 'Gestão de indicadores' },
     { key: 'gestao_auditorias', label: 'Gestão de auditorias' },
+    { key: 'formularios', label: 'Formulários (motor de formulários dos módulos)' },
   ] },
   { grupo: 'Pessoas', itens: [
     { key: 'gestao_treinamentos', label: 'Gestão de treinamentos' },
@@ -25,6 +26,7 @@ export const MODULOS = [
     { key: 'gestao_reunioes', label: 'Gestão de reuniões' },
     { key: 'gestao_ordem_servico', label: 'Gestão de ordem de serviço' },
     { key: 'gestao_patrimonio', label: 'Gestão do patrimônio' },
+    { key: 'gestao_limpeza', label: 'Rotinas de Limpeza' },
     { key: 'controle_agua', label: 'Controle de qualidade da água' },
     { key: 'gestao_temp_umidade', label: 'Controle de temperatura e umidade' },
     { key: 'faturamento', label: 'Faturamento' },
