@@ -223,6 +223,7 @@ const PERMISSAO_FLAGS_KEYS = [
   'view_usuarios', 'view_hospitais', 'view_medicos', 'view_convenios', 'view_procedimentos',
   'view_status', 'view_motivos', 'view_grupos', 'view_setores', 'view_unidades', 'add_unidade',
   'edit_own_profile', 'view_auditoria', 'view_classificacoes_sprint',
+  'view_processos', 'view_tipos_documento', 'view_tipos_bem', 'view_localizacoes_patrimonio', 'view_motivos_obsolescencia',
 ];
 const MODULOS_GENERICOS_KEYS = [
   'gestao_estrategica', // já implementado, mas fora de agendamento/configuracoes — usa ação genérica
@@ -232,7 +233,7 @@ const MODULOS_GENERICOS_KEYS = [
   'recursos_humanos', 'gestao_atendimento_cliente', 'gestao_reunioes', 'gestao_ordem_servico',
   'gestao_patrimonio', 'controle_agua', 'gestao_temp_umidade', 'gestao_fornecedores_produtos',
   'gestao_fornecedores_servicos', 'modelo_canvas', 'cadeia_valor', 'gestao_mudanca_inovacao',
-  'analise_swot',
+  'analise_swot', 'gestao_documentos', 'formularios', 'gestao_limpeza',
 ];
 
 function _gerarSenhaAleatoria(tamanho = 14) {
