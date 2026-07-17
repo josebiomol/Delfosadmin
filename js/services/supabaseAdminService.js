@@ -221,7 +221,7 @@ const PERMISSAO_FLAGS_KEYS = [
   'view_blocked_dates', 'add_blocked_date', 'edit_blocked_date', 'delete_blocked_date',
   // configuracoes
   'view_usuarios', 'view_hospitais', 'view_medicos', 'view_convenios', 'view_procedimentos',
-  'view_status', 'view_motivos', 'view_grupos', 'view_setores', 'view_unidades', 'add_unidade',
+  'view_status', 'view_motivos', 'view_grupos', 'view_setores', 'view_unidades',
   'edit_own_profile', 'view_auditoria', 'view_classificacoes_sprint',
   'view_processos', 'view_tipos_documento', 'view_tipos_bem', 'view_localizacoes_patrimonio', 'view_motivos_obsolescencia',
 ];
