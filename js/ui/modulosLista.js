@@ -17,6 +17,7 @@ export const MODULOS = [
   ] },
   { grupo: 'Pessoas', itens: [
     { key: 'gestao_treinamentos', label: 'Gestão de treinamentos' },
+    { key: 'area_colaborador', label: 'Área do colaborador' },
     { key: 'gestao_acidentes', label: 'Gestão de acidentes' },
     { key: 'recursos_humanos', label: 'Recursos humanos' },
   ] },
