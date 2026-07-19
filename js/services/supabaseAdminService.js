@@ -230,6 +230,7 @@ const MODULOS_GENERICOS_KEYS = [
   'faturamento', 'tarefas',
   'gestao_processos', 'gestao_riscos', 'gestao_ocorrencias', 'gestao_planos_acoes',
   'gestao_indicadores', 'gestao_auditorias', 'gestao_treinamentos', 'gestao_acidentes',
+  'area_colaborador',
   'recursos_humanos', 'gestao_atendimento_cliente', 'gestao_reunioes', 'gestao_ordem_servico',
   'gestao_patrimonio', 'controle_agua', 'gestao_temp_umidade', 'gestao_fornecedores_produtos',
   'gestao_fornecedores_servicos', 'modelo_canvas', 'cadeia_valor', 'gestao_mudanca_inovacao',
