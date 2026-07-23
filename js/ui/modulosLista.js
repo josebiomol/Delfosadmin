@@ -11,6 +11,7 @@ export const MODULOS = [
     { key: 'gestao_riscos', label: 'Gestão de riscos' },
     { key: 'gestao_ocorrencias', label: 'Gestão de ocorrências' },
     { key: 'gestao_planos_acoes', label: 'Gestão de planos de ações' },
+    { key: 'kanban', label: 'Kanban (quadros e cartões)' },
     { key: 'gestao_indicadores', label: 'Gestão de indicadores' },
     { key: 'gestao_auditorias', label: 'Gestão de auditorias' },
     { key: 'formularios', label: 'Formulários (motor de formulários dos módulos)' },
